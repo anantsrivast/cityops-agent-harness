@@ -1,0 +1,12 @@
+# Secrets — never commit
+wallet/
+*.sso
+*.p12
+*.pem
+.env
+
+# Python/Jupyter
+__pycache__/
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
