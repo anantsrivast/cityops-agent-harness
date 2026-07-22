@@ -17,7 +17,7 @@
 - New registry tables use `HARNESS_` prefix: `HARNESS_TOOLS`, `HARNESS_WORKFLOW`, `HARNESS_SKILLS` (the shared `ANANT` schema hosts other projects — never `DROP` anything not `CITY_`/`HARNESS_`-prefixed). Domain tables keep the lab names `CITY_ASSET`, `CITY_INSPECTION_FINDING` (idempotent create).
 - Embeddings: in-database ONNX `ALL_MINILM_L12_V2`, 384-dim, `array.array('f', embedder.embed([text])[0].tolist())` bind pattern.
 - Learner-gap convention (from `tools/make_student.py`): `# ✏️ TODO(n): <instruction>` line, then `# TODO-SOLUTION-START` / `# TODO-SOLUTION-END` around solution lines. Five TODOs in this notebook.
-- Thresholds (exact values, used consistently): intent dedup `merge_below=0.15`, `new_above=0.40`; tool retrieval `TOOL_DISTANCE_MAX=0.75`; skill retrieval `SKILL_DISTANCE_MAX=0.55`; lifecycle `promote_at=2` verified uses (0 failures), `retire_failures=2`; harvest `min_occurrences=3` and `verified_successes >= 2` and `verified_successes > failures`.
+- Thresholds (exact values, used consistently): intent dedup `merge_below=0.15`, `new_above=0.40`; tool retrieval `TOOL_DISTANCE_MAX=0.75`; skill retrieval `SKILL_DISTANCE_MAX=0.55`; lifecycle `promote_at=2` verified uses (0 failures), `retire_failures=2`; harvest `min_occurrences=3` and `verified_successes >= 2` and `verified_successes > failures`. (amended after live calibration: TOOL_DISTANCE_MAX=0.92, SKILL_DISTANCE_MAX=0.65 — see task-7 report)
 - Notebook files: `notebooks/01_self_improving_copilot_complete.ipynb` (generated) + `notebooks/01_self_improving_copilot_todo.ipynb` (via `tools/make_student.py`). Kernelspec `harness` like 00.
 - Commit messages end with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 
