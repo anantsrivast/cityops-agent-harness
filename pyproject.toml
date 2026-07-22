@@ -1,0 +1,35 @@
+[project]
+name = "cityops-harness"
+version = "0.1.0"
+description = "CityOps Agent Harness - agent memory + harness engineering workshop series"
+requires-python = ">=3.12"
+dependencies = [
+    "oracledb>=2.0",
+    "python-dotenv>=1.0",
+    "litellm>=1.40",
+    "langfuse>=3.0",
+    "langchain-core>=0.3",
+    "langchain-ollama>=0.2",
+    "langchain-anthropic>=0.3",
+    "langchain-openai>=0.3",
+    "oracleagentmemory",
+    "pydantic>=2",
+    "pandas",
+    "matplotlib",
+    "jupyter",
+    "ipykernel",
+    "ipywidgets",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "nbformat>=5"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
