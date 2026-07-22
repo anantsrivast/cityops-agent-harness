@@ -58,3 +58,15 @@ def test_require_raises_with_failed_descriptions(monkeypatch):
 def test_require_passes_silently(monkeypatch):
     monkeypatch.setitem(REGISTRY, "nb_ok", [ArtifactCheck("fine", "SELECT 1")])
     require(StubConn({"SELECT 1": 1}), "nb_ok")
+
+
+def test_registry_seeds_notebook_01():
+    checks = REGISTRY["01_self_improving_copilot"]
+    descs = " ".join(c.description for c in checks)
+    sqls = " ".join(c.sql for c in checks)
+    assert len(checks) == 4
+    assert "CITY_INSPECTION_FINDING" in sqls
+    assert "HARNESS_TOOLS" in sqls
+    assert "HARNESS_WORKFLOW" in sqls
+    assert "HARNESS_SKILLS" in sqls
+    assert "domain data" in descs

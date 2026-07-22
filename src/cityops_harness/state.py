@@ -26,6 +26,24 @@ REGISTRY: dict[str, list[ArtifactCheck]] = {
             ),
         ),
     ],
+    "01_self_improving_copilot": [
+        ArtifactCheck(
+            description="CityOps domain data loaded (CITY_INSPECTION_FINDING rows)",
+            sql="SELECT COUNT(*) FROM CITY_INSPECTION_FINDING",
+        ),
+        ArtifactCheck(
+            description="tool registry table HARNESS_TOOLS",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_TOOLS'",
+        ),
+        ArtifactCheck(
+            description="workflow capture table HARNESS_WORKFLOW",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_WORKFLOW'",
+        ),
+        ArtifactCheck(
+            description="skillbox table HARNESS_SKILLS",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_SKILLS'",
+        ),
+    ],
     # Notebooks 01-04 register their artifacts here in later phases.
 }
 
