@@ -3,7 +3,7 @@
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
   "hostRequirements": { "cpus": 4, "memory": "8gb" },
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": { "moby": false },
     "ghcr.io/prulloac/devcontainer-features/ollama:1": {}
   },
   "forwardPorts": [3000, 11434],
