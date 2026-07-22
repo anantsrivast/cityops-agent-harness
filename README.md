@@ -14,7 +14,7 @@ actually works.
 | `notebooks/00_setup.ipynb` | Verify ADB, in-DB embeddings, LLM provider, Langfuse |
 | `notebooks/01_self_improving_copilot_complete.ipynb` (+ `_todo`) | Tool registry, verified workflow capture, skill harvesting with lifecycle |
 | `notebooks/02_scheduled_briefings` | Curated memory promotion + DBMS_SCHEDULER automations |
-| `notebooks/03_context_engineering` | Compaction and offloading, measured for fidelity |
+| `notebooks/03_context_engineering_complete.ipynb` (+ `_todo`) | Compaction with a card-fidelity probe, agent-in-the-loop offloading, blobs barred from promotion |
 | `notebooks/04_evals` | Five Langfuse evals across model and memory |
 
 Notebooks 01-04 come in two flavors: `*_complete.ipynb` (full solutions) and
