@@ -12,7 +12,7 @@ actually works.
 | Notebook | What it teaches |
 |---|---|
 | `notebooks/00_setup.ipynb` | Verify ADB, in-DB embeddings, LLM provider, Langfuse |
-| `notebooks/01_self_improving_copilot` | Tool registry, skillbox, verified workflow harvesting |
+| `notebooks/01_self_improving_copilot_complete.ipynb` (+ `_todo`) | Tool registry, verified workflow capture, skill harvesting with lifecycle |
 | `notebooks/02_scheduled_briefings` | Curated memory promotion + DBMS_SCHEDULER automations |
 | `notebooks/03_context_engineering` | Compaction and offloading, measured for fidelity |
 | `notebooks/04_evals` | Five Langfuse evals across model and memory |

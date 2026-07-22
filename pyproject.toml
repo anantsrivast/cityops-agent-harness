@@ -12,6 +12,7 @@ dependencies = [
     "langchain-ollama>=0.2",
     "langchain-anthropic>=0.3",
     "langchain-openai>=0.3",
+    "langchain-oracledb>=1.0",
     "oracleagentmemory",
     "pydantic>=2",
     "pandas",
