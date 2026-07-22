@@ -1,0 +1,15 @@
+# Seeds a deterministic org/project/user + API keys into the local stack so
+# LANGFUSE_MODE=local works with zero clicks. Values must match
+# cityops_harness.tracing.LOCAL_PUBLIC_KEY / LOCAL_SECRET_KEY.
+services:
+  langfuse-web:
+    environment:
+      LANGFUSE_INIT_ORG_ID: cityops
+      LANGFUSE_INIT_ORG_NAME: CityOps
+      LANGFUSE_INIT_PROJECT_ID: cityops-harness
+      LANGFUSE_INIT_PROJECT_NAME: cityops-agent-harness
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-local-0000
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-local-0000
+      LANGFUSE_INIT_USER_EMAIL: workshop@example.com
+      LANGFUSE_INIT_USER_NAME: Workshop
+      LANGFUSE_INIT_USER_PASSWORD: workshop123
