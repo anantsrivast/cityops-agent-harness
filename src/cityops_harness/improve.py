@@ -86,3 +86,58 @@ def trajectory_to_text(steps: list[dict], max_result_chars: int = 300) -> str:
         lines.append(f"  args: {json.dumps(step['args'], default=str)}")
         lines.append(f"  result: {truncate_result(step['result'], max_result_chars)}")
     return "\n".join(lines)
+
+
+def merge_decision(
+    distance: float, merge_below: float = 0.15, new_above: float = 0.40
+) -> str:
+    """Gray-band intent dedup: certain merges and certain news are decided by
+    embedding distance alone; the band in between gets an LLM same-task check."""
+    if distance < merge_below:
+        return "merge"
+    if distance <= new_above:
+        return "ask"
+    return "new"
+
+
+def lifecycle_transition(
+    status: str,
+    verified_successes: int,
+    failures: int,
+    promote_at: int = 2,
+    retire_failures: int = 2,
+) -> str:
+    """Skill lifecycle: provisional skills earn approval through verified,
+    failure-free linked outcomes; accumulated failures retire any skill."""
+    if status == "retired":
+        return "retired"
+    if failures >= retire_failures:
+        return "retired"
+    if status == "provisional" and verified_successes >= promote_at and failures == 0:
+        return "approved"
+    return status
+
+
+def harvest_ready(
+    occurrences: int,
+    verified_successes: int,
+    failures: int,
+    min_occurrences: int = 3,
+) -> bool:
+    """Promote only what recurs AND verifiably works."""
+    return (
+        occurrences >= min_occurrences
+        and verified_successes >= 2
+        and verified_successes > failures
+    )
+
+
+def filter_by_distance(
+    rows: list[dict], max_distance: float, key: str = "distance"
+) -> list[dict]:
+    return [r for r in rows if r[key] <= max_distance]
+
+
+def compute_schema_sha(columns: list[tuple]) -> str:
+    canon = "\n".join(sorted(f"{t}.{c}:{d}" for t, c, d in columns))
+    return hashlib.sha256(canon.encode()).hexdigest()
