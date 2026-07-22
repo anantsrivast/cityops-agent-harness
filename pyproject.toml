@@ -8,6 +8,9 @@ dependencies = [
     "python-dotenv>=1.0",
     "litellm>=1.40",
     "langfuse>=3.0",
+    # langfuse.langchain.CallbackHandler imports the `langchain` meta-package to
+    # branch on its __version__, so langchain-core alone is not enough.
+    "langchain>=1.0",
     "langchain-core>=0.3",
     "langchain-ollama>=0.2",
     "langchain-anthropic>=0.3",
