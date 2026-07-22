@@ -49,6 +49,10 @@ All work is on `main`; the `foundation` branch is history.
 
 ## Known carry-overs / untested
 
+- **Deferred design, not built:** strength-based card consolidation (notebook
+  03's card never compresses — it is additive and has no ceiling). Full design,
+  including why TTL eviction is the wrong answer, is in the design spec under
+  *Deferred: strength-based card consolidation*. Revisit after phase 04.
 - **Blocked on ADMIN:** `GRANT CREATE PROCEDURE TO ANANT;` and
   `GRANT CREATE JOB TO ANANT;` — phase 02 task 7 cannot run without them.
   Notebook 03 deliberately needs neither.

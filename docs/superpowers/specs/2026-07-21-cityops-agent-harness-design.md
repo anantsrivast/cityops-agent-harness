@@ -125,6 +125,12 @@ critique of 8.1/8.2b):
 - Offloaded blobs are explicitly excluded from promotion (closing the
   unmeasured Path-1 × offloading interaction the review flags).
 
+As implemented (2026-07-22), the card is **additive** — the model may add or
+correct a fact but never delete one. That is what makes the fidelity probe
+trustworthy, and it means the notebook demonstrates no compression at all. See
+*Deferred: strength-based card consolidation* below for the design that
+resolves this; it is not built.
+
 ### 04 — Evals: five, through Langfuse
 
 All evals run as Langfuse datasets with scored traces, across whichever
@@ -154,6 +160,113 @@ Each phase is its own plan → implement → review cycle:
 3. **02 scheduled briefings**
 4. **03 context engineering**
 5. **04 evals**
+
+## Deferred: strength-based card consolidation
+
+**Status:** designed, not implemented. Revisit after phase 04. Nothing below
+exists in code.
+
+### Why
+
+Notebook 03's live run showed the compaction card was **never smaller than the
+transcript it stood for** — a flat ~0.71× from the first fold onward:
+
+| card version | turns | transcript chars | card chars | ratio |
+|---|---|---|---|---|
+| v1 | 7 | 2,042 | 2,888 | 0.71× |
+| v3 | 23 | 6,383 | 8,660 | 0.74× |
+| v6 | 40 | 11,890 | 16,726 | 0.71× |
+
+Two independent causes, and only the second is about forgetting:
+
+1. **Nothing asks for compression.** v1 holds 7 facts drawn from 7 turns, at
+   close to original length plus JSON scaffolding. The fold trigger fires on
+   *pending turn* size and never inspects the card, so the model transcribes
+   into a schema rather than summarising. A card with no ceiling has no reason
+   to compress.
+2. **Nothing may leave.** `merge_card` is additive by design, so there is no
+   path back down once the card is oversized.
+
+The obvious fix — evict by age, TTL-style — is wrong for this domain and wrong
+about memory generally. Human forgetting tracks *retrieval strength*, not
+arrival time: facts that keep being used survive, and the ones that fade lose
+their **specifics before their gist**. In an inspection season the turn-4 fact
+("Pier 3 bearing plate corroded, the reason Harbor Bridge was prioritised") is
+precisely the one that must outlive turn 30's routine observation.
+
+### Two triggers, kept separate
+
+- **Fold trigger** (exists): pending turns ≥ `CARD_BUDGET` (2,000 chars) → one
+  LLM call folds them in. Governs *when we summarise new material*.
+- **Consolidation trigger** (new): immediately after every fold-and-merge,
+  deterministic, no LLM —
+  `while len(render_card(card)) > CARD_CEILING and len(card["facts"]) > FLOOR:
+  evict the weakest fact`. Governs *when we forget*. Proposed
+  `CARD_CEILING = 4_000` chars (~⅓ of the season's transcript, so it bites from
+  fold 2), `FLOOR = 3` facts so a pathological run cannot strip the card bare.
+  Re-checks after each eviction rather than evicting a fixed count.
+
+### Strength model
+
+```
+strength = (1 + reinforcements) * 0.5 ** ((current_turn - last_seen_turn) / half_life_turns)
+```
+
+`half_life_turns = 8.0` (the season folds roughly every 7 turns). This is the
+same half-life shape as `rerank_by_recency` in `promote.py`, deliberately, so
+the codebase carries one decay model rather than two.
+
+`reinforcements` comes from a new `reinforced: [fact_ids]` field on the
+compaction call — which existing facts the new turns touched. Those facts get
+`reinforcements += 1` and `last_seen_turn = current_turn`; a model that omits
+the field degrades the policy to pure recency rather than failing. The
+deterministic alternative (embedding similarity between new turns and existing
+facts, using the in-DB embedder) costs a round trip per turn and is cruder.
+
+### Consolidation, not deletion
+
+Evicted facts collapse into a third top-level card key, `gist`, retaining their
+ids:
+
+```json
+{"gist": [{"ids": ["f3", "f7"],
+           "text": "Several earlier corrosion findings on Harbor Bridge piers."}]}
+```
+
+Retaining ids is what makes three-way scoring possible. `gist` lives inside
+`CARD_JSON`, so `HARNESS_CARD` needs **no schema migration**.
+
+### What this buys: a better metric
+
+Fidelity stops being hit/miss and becomes **verbatim / gist-only / lost**. That
+distinction is the whole point — a fact surviving as gist is a pass for "which
+bridge was the problem?" and a fail for "which pier?", and the probe should say
+which. Eval 4 in notebook 04 scores this directly.
+
+### Shape of the work
+
+- `context.py` (pure, unit-tested): `fact_strength(...)`,
+  `select_for_eviction(card, current_turn, ceiling_chars=4_000, floor_facts=3,
+  half_life_turns=8.0) -> (kept, evicted)`, `fact_status(planted_ids, card)`.
+  `select_for_eviction` picks victims but does not write gist text.
+- Notebook: the gist *text* is an LLM call (one per consolidation event,
+  batching that event's evictions), keeping the repo's pure-logic/notebook-side-
+  effects split. The compaction prompt gains the `reinforced` field.
+- `card_fidelity` keeps its existing signature so current tests stay green; its
+  `recall` becomes verbatim-recall, with `fact_status` carrying the nuance.
+- The payoff cell runs the **same season under both policies**, additive and
+  strength-based, plotting two curves against their fidelity.
+
+### Known risks
+
+- ~11 extra LLM calls per run (≈5 gist + 6 second-policy folds).
+- At a 4,000-char ceiling an unreinforced planted fact may legitimately end up
+  gist-only or lost. That is a true result, not a regression — so the assertion
+  must be written against `fact_status` (e.g. "no planted fact is fully lost")
+  rather than demanding verbatim survival, or the notebook goes red for the
+  right reason.
+- Retrieval-induced strengthening (the probe itself reinforcing what it asks
+  about) is deliberately out of scope here; it belongs with eval 4.
 
 ## Open items
 
