@@ -9,7 +9,7 @@ echo "[2/3] Unpacking Oracle wallet from WALLET_B64 secret (if set)..."
 if [ -n "${WALLET_B64:-}" ] && [ ! -f wallet/tnsnames.ora ]; then
   mkdir -p wallet
   echo "$WALLET_B64" | base64 -d > /tmp/wallet.zip
-  unzip -o -q /tmp/wallet.zip -d wallet
+  python -m zipfile -e /tmp/wallet.zip wallet/
   rm /tmp/wallet.zip
   echo "  wallet/ unpacked."
 elif [ -f wallet/tnsnames.ora ]; then

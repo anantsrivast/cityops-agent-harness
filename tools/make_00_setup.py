@@ -123,5 +123,10 @@ cells.append(nbf.v4.new_code_cell(
 ))
 
 nb["cells"] = cells
+nb.metadata["kernelspec"] = {
+    "name": "harness",
+    "display_name": "CityOps Harness",
+    "language": "python",
+}
 nbf.write(nb, "notebooks/00_setup.ipynb")
 print("wrote notebooks/00_setup.ipynb")
