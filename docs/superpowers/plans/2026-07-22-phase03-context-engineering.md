@@ -26,7 +26,8 @@
 ## Carry-overs honoured from phase 02
 
 - Langfuse live score delivery is still unverified and the local stack is deliberately parked; every notebook cell must work with `LANGFUSE_MODE=off`. Tracing is attached when a handler exists and skipped silently otherwise.
-- Notebook 03 registers its artifacts in `state.REGISTRY` (this plan, task 2) and opens with `require(conn, "02_scheduled_briefings")`.
+- Notebook 03 registers its artifacts in `state.REGISTRY` (this plan, task 2).
+- **Notebook 03 must NOT call `require(conn, "02_scheduled_briefings")`.** That key includes a scheduled-jobs check which cannot pass until phase 02 task 7 runs, and task 7 is blocked on ADMIN grants outside this repo's control. A hard `require` would make notebook 03 unrunnable for a reason that has nothing to do with context engineering. Instead notebook 03 hard-requires `01_self_improving_copilot` (whose artifacts it genuinely consumes), idempotently backfills the one notebook-02 table it needs (`HARNESS_SCRATCH`), and reports notebook 02's full status **non-fatally** via `verify()` so a learner who skipped 02 sees exactly what is pending. This is the spec's "independently runnable, but continuity is the lesson" rule applied literally.
 
 ---
 
@@ -230,7 +231,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 | "Bytes are recoverable" declared a win | **Agent in the loop**: the model must notice the reference, fetch it, and use the payload |
 | Offloading and promotion never tested together | Offloaded blobs are **barred from promotion**, and the notebook proves it |
 
-- [ ] **Step 2: `SETUP`** — imports (`json`, `matplotlib.pyplot as plt`, harness modules incl. `from cityops_harness import context, promote`), `settings = load_settings()`, one pooled `conn`, `require(conn, "02_scheduled_briefings")`, `CHAT = chat_model(settings)`, `HANDLER = init_tracing(settings)`, and a `CFG = {"callbacks": [HANDLER]} if HANDLER else {}` idiom so every later `CHAT.invoke(..., config=CFG)` works with Langfuse off. Closes with `ok(...)`.
+- [ ] **Step 2: `SETUP`** — imports (`json`, `matplotlib.pyplot as plt`, harness modules incl. `from cityops_harness import context, promote`), `settings = load_settings()`, one pooled `conn`, `require(conn, "01_self_improving_copilot")`, `CHAT = chat_model(settings)`, `HANDLER = init_tracing(settings)`, and a `CFG = {"callbacks": [HANDLER]} if HANDLER else {}` idiom so every later `CHAT.invoke(..., config=CFG)` works with Langfuse off. Then a second cell: non-fatal `verify(conn, "02_scheduled_briefings")` printed row by row, plus an idempotent `HARNESS_SCRATCH` backfill so the exclusion section (task 6) has a table to write into whether or not notebook 02 was run live. Closes with `ok(...)`.
 
 - [ ] **Step 3: `SEASON`** — idempotent `HARNESS_TRANSCRIPT` create (`TURN_NO`, `SPEAKER`, `CONTENT`, `PLANTED_FACT_ID`), then generate a deterministic 40-turn inspection season **without LLM calls** (seeded `random.Random(20260722)` over the real assets in `CITY_INSPECTION_FINDING`), so the notebook is reproducible and cheap. Exactly three planted facts at turns 4, 11, and 19, each a specific, checkable detail (e.g. `f1` = "Pier 3 bearing plate corroded, flagged for Q3"). `check(...)` asserts 40 turns and 3 planted facts.
 
@@ -241,7 +242,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```bash
 python tools/make_03_notebook.py
 python -c "import nbformat; nb=nbformat.read('notebooks/03_context_engineering_complete.ipynb', as_version=4); print(len(nb.cells), 'cells')"
-python tools/make_student.py notebooks/03_context_engineering_complete.ipynb
+python tools/make_student.py notebooks   # takes a DIRECTORY, not a file; regenerates every *_todo
 ```
 
 - [ ] **Step 6: Commit** — `feat: notebook 03 generator - season transcript and card store`
@@ -295,7 +296,7 @@ This is the teaching core. The chart alone is the thing the review calls insuffi
 - [ ] **Step 4: Regenerate both flavors, verify TODO count**
 
 ```bash
-python tools/make_03_notebook.py && python tools/make_student.py notebooks/03_context_engineering_complete.ipynb
+python tools/make_03_notebook.py && python tools/make_student.py notebooks   # takes a DIRECTORY, not a file; regenerates every *_todo
 python - <<'EOF'
 import json
 for f in ("notebooks/03_context_engineering_complete.ipynb", "notebooks/03_context_engineering_todo.ipynb"):
