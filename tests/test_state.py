@@ -1,0 +1,60 @@
+import pytest
+
+from cityops_harness.state import REGISTRY, ArtifactCheck, require, verify
+
+
+class StubCursor:
+    def __init__(self, results):
+        self._results = results
+
+    def execute(self, sql):
+        if isinstance(self._results.get(sql), Exception):
+            raise self._results[sql]
+        self._row = (self._results.get(sql, 0),)
+
+    def fetchone(self):
+        return self._row
+
+    def close(self):
+        pass
+
+
+class StubConn:
+    def __init__(self, results):
+        self._results = results
+
+    def cursor(self):
+        return StubCursor(self._results)
+
+
+def test_registry_seeds_setup_notebook():
+    assert "00_setup" in REGISTRY
+    assert all(isinstance(c, ArtifactCheck) for c in REGISTRY["00_setup"])
+
+
+def test_verify_pass_and_fail(monkeypatch):
+    checks = [
+        ArtifactCheck("thing exists", "SELECT 1 FROM a"),
+        ArtifactCheck("missing thing", "SELECT 0 FROM b"),
+    ]
+    monkeypatch.setitem(REGISTRY, "nb_test", checks)
+    conn = StubConn({"SELECT 1 FROM a": 1, "SELECT 0 FROM b": 0})
+    assert verify(conn, "nb_test") == [("thing exists", True), ("missing thing", False)]
+
+
+def test_verify_treats_sql_error_as_failure(monkeypatch):
+    monkeypatch.setitem(REGISTRY, "nb_err", [ArtifactCheck("errors", "SELECT boom")])
+    conn = StubConn({"SELECT boom": RuntimeError("ORA-00942")})
+    assert verify(conn, "nb_err") == [("errors", False)]
+
+
+def test_require_raises_with_failed_descriptions(monkeypatch):
+    monkeypatch.setitem(REGISTRY, "nb_req", [ArtifactCheck("the widget", "SELECT 0")])
+    conn = StubConn({"SELECT 0": 0})
+    with pytest.raises(RuntimeError, match="the widget"):
+        require(conn, "nb_req")
+
+
+def test_require_passes_silently(monkeypatch):
+    monkeypatch.setitem(REGISTRY, "nb_ok", [ArtifactCheck("fine", "SELECT 1")])
+    require(StubConn({"SELECT 1": 1}), "nb_ok")
