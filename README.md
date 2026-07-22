@@ -42,6 +42,12 @@ cp .env.example .env        # fill in DB_PASSWORD, WALLET_PASSWORD, keys
 .venv/bin/jupyter lab notebooks/00_setup.ipynb
 ```
 
+> **Non-ADMIN database users:** `00_setup.ipynb` loads the ONNX embedding
+> model via `DBMS_VECTOR.LOAD_ONNX_MODEL_CLOUD`, which needs object-storage
+> access. If you connect as a regular user, first run (once, as ADMIN):
+> `GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;` — otherwise the load fails
+> with `ORA-00904: "DBMS_CLOUD"."GET_OBJECT": invalid identifier`.
+
 ## LLM providers
 
 Set `LLM_PROVIDER` in `.env`:
