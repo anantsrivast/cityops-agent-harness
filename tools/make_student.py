@@ -28,6 +28,8 @@ def strip_solutions(source: str) -> str:
             in_block = False
         elif not in_block:
             out.append(line)
+    if in_block:
+        raise ValueError("unclosed TODO-SOLUTION-START: missing TODO-SOLUTION-END marker")
     return "".join(out)
 
 

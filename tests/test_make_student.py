@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from make_student import strip_solutions, to_student
@@ -26,6 +28,12 @@ def test_strip_solutions_replaces_block_keeping_indent():
 
 def test_strip_solutions_noop_without_markers():
     assert strip_solutions("x = 1\n") == "x = 1\n"
+
+
+def test_strip_solutions_raises_on_unclosed_marker():
+    src = "def f():\n    # TODO-SOLUTION-START\n    return 1\n"
+    with pytest.raises(ValueError, match="TODO-SOLUTION-END"):
+        strip_solutions(src)
 
 
 def _nb(cells):
