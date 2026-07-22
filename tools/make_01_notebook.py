@@ -642,7 +642,281 @@ CAPTURE = [
     ),
 ]
 
-SECTIONS = [INTRO, SETUP, BOOTSTRAP, REGISTRY_DDL, TOOLBOX_SEC, AGENT_LOOP, JUDGE, CAPTURE]
+# --------------------------------------------------------------------------
+# Section: harvester + skill lifecycle + two-level retrieval
+# --------------------------------------------------------------------------
+SKILLS_SEC = [
+    md(
+        "## 7 · Harvesting skills - and making them earn their authority\n\n"
+        "The harvester promotes workflows that **recur and verifiably work** into `SKILL.md`\n"
+        "documents. Three review fixes land here:\n\n"
+        "- distillation reads the **full trajectory** (args + results), then a **faithfulness\n"
+        "  check** compares the distilled steps back against it - unfaithful skills are rejected\n"
+        "- a new skill is born **provisional** (low prompt authority) and records the\n"
+        "  **schema fingerprint** it was distilled against\n"
+        "- retrieval applies a **distance threshold**, injects **approved before provisional**,\n"
+        "  and flags **stale** skills whose schema no longer matches"
+    ),
+    code(
+        "class Distilled(BaseModel):\n"
+        "    name: str\n"
+        "    description: str\n"
+        "    when_to_use: str\n"
+        "    steps_body: str\n"
+        "\n"
+        "\n"
+        "class Faithful(BaseModel):\n"
+        "    faithful: bool\n"
+        "    reason: str\n"
+        "\n"
+        "\n"
+        "_distill_model = CHAT.with_structured_output(Distilled)\n"
+        "_faithful_model = CHAT.with_structured_output(Faithful)\n"
+        "\n"
+        "\n"
+        "def promote_workflow_to_skill(row) -> str | None:\n"
+        "    steps_text = improve.trajectory_to_text(json.loads(row[\"steps\"]))\n"
+        "    d = _distill_model.invoke(\n"
+        "        \"Distill this verified, recurring copilot trajectory into a reusable procedure.\\n\"\n"
+        "        \"Ground every step in what ACTUALLY happened - name the tools used, in order,\\n\"\n"
+        "        \"with parameterised arguments. Do not invent steps.\\n\\n\"\n"
+        "        f\"Intent: {row['intent']}\\n\\nTrajectory:\\n{steps_text}\"\n"
+        "    )\n"
+        "    f = _faithful_model.invoke(\n"
+        "        \"Do these distilled steps faithfully describe this trajectory - same tools, same\\n\"\n"
+        "        \"order, no invented actions? faithful=true/false.\\n\\n\"\n"
+        "        f\"Distilled steps:\\n{d.steps_body}\\n\\nTrajectory:\\n{steps_text}\"\n"
+        "    )\n"
+        "    if not f.faithful:\n"
+        "        print(f\"  REJECTED (unfaithful distillation): {f.reason[:120]}\")\n"
+        "        return None\n"
+        "    tools_used = sorted({s['tool'] for s in json.loads(row['steps'])})\n"
+        "    content = improve.render_skill_md(\n"
+        "        name=d.name, description=d.description, tools=tools_used,\n"
+        "        when_to_use=d.when_to_use, steps_body=d.steps_body,\n"
+        "        source_workflow_id=row[\"workflow_id\"], schema_sha=SCHEMA_SHA)\n"
+        "    import hashlib\n"
+        "    sha = hashlib.sha256(content.encode()).hexdigest()\n"
+        "    sid = str(uuid.uuid4())[:12]\n"
+        "    vec = array.array('f', embedder.embed([f\"{d.name}: {d.description}\"])[0].tolist())\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"INSERT INTO HARNESS_SKILLS\n"
+        "                       (skill_id, name, description, content, sha, status,\n"
+        "                        schema_sha, source_workflow_id, embedding)\n"
+        "                       VALUES (:sid, :n, :d, :c, :sha, 'provisional', :ss, :src, :e)\"\"\",\n"
+        "                    sid=sid, n=d.name, d=d.description, c=content, sha=sha,\n"
+        "                    ss=SCHEMA_SHA, src=row[\"workflow_id\"], e=vec)\n"
+        "        cur.execute(\"UPDATE HARNESS_WORKFLOW SET promoted = 'Y' WHERE workflow_id = :w\",\n"
+        "                    w=row[\"workflow_id\"])\n"
+        "    conn.commit()\n"
+        "    print(f\"  harvested PROVISIONAL skill {d.name!r} ({sid}) from workflow {row['workflow_id']}\")\n"
+        "    return sid\n"
+        "\n"
+        "\n"
+        "def harvest() -> list:\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"SELECT workflow_id, intent, steps, occurrences,\n"
+        "                              verified_successes, failures\n"
+        "                         FROM HARNESS_WORKFLOW WHERE promoted = 'N'\"\"\")\n"
+        "        cols = [d[0].lower() for d in cur.description]\n"
+        "        rows = []\n"
+        "        for r in cur.fetchall():\n"
+        "            row = dict(zip(cols, r))\n"
+        "            if hasattr(row[\"steps\"], \"read\"):\n"
+        "                row[\"steps\"] = row[\"steps\"].read()\n"
+        "            if hasattr(row[\"intent\"], \"read\"):\n"
+        "                row[\"intent\"] = row[\"intent\"].read()\n"
+        "            rows.append(row)\n"
+        "    harvested = []\n"
+        "    for row in rows:\n"
+        "        # ✏️ TODO(5): the harvest gate - promote only what recurs AND verifiably works.\n"
+        "        #             Use improve.harvest_ready(occurrences, verified_successes, failures).\n"
+        "        # TODO-SOLUTION-START\n"
+        "        if not improve.harvest_ready(row[\"occurrences\"], row[\"verified_successes\"],\n"
+        "                                     row[\"failures\"]):\n"
+        "            continue\n"
+        "        # TODO-SOLUTION-END\n"
+        "        sid = promote_workflow_to_skill(row)\n"
+        "        if sid:\n"
+        "            harvested.append(sid)\n"
+        "    return harvested\n"
+        "\n"
+        "ok(\"harvester ready\")"
+    ),
+    code(
+        "SKILL_DISTANCE_MAX = 0.55\n"
+        "\n"
+        "\n"
+        "def retrieve_skills(query: str, k: int = 3):\n"
+        "    qv = array.array('f', embedder.embed([query])[0].tolist())\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"SELECT skill_id, name, status, content, schema_sha,\n"
+        "                              VECTOR_DISTANCE(embedding, :q, COSINE) AS distance\n"
+        "                         FROM HARNESS_SKILLS WHERE status != 'retired'\n"
+        "                        ORDER BY distance FETCH FIRST :k ROWS ONLY\"\"\", q=qv, k=k)\n"
+        "        cols = [d[0].lower() for d in cur.description]\n"
+        "        rows = []\n"
+        "        for r in cur.fetchall():\n"
+        "            row = dict(zip(cols, r))\n"
+        "            if hasattr(row[\"content\"], \"read\"):\n"
+        "                row[\"content\"] = row[\"content\"].read()\n"
+        "            rows.append(row)\n"
+        "    return improve.filter_by_distance(rows, SKILL_DISTANCE_MAX)\n"
+        "\n"
+        "\n"
+        "def build_skill_manifest(query):\n"
+        "    \"\"\"Two-level retrieval: approved skills carry authority; provisional ones are\n"
+        "    labelled as unproven; stale schema fingerprints are flagged.\"\"\"\n"
+        "    hits = retrieve_skills(query)\n"
+        "    if not hits:\n"
+        "        return \"\", []\n"
+        "    cur_sha = current_schema_sha()\n"
+        "    parts, ids = [], []\n"
+        "    for h in sorted(hits, key=lambda r: 0 if r[\"status\"] == \"approved\" else 1):\n"
+        "        ids.append(h[\"skill_id\"])\n"
+        "        stale = \" [STALE: schema changed since distillation - re-verify]\" \\\n"
+        "            if h[\"schema_sha\"] != cur_sha else \"\"\n"
+        "        if h[\"status\"] == \"approved\":\n"
+        "            label = f\"APPROVED procedure{stale} - prefer this approach:\"\n"
+        "        else:\n"
+        "            label = (f\"PROVISIONAL procedure{stale} - an unproven candidate; treat as a\"\n"
+        "                     \" suggestion and verify against fresh data:\")\n"
+        "        parts.append(f\"\\n\\n--- {label} ---\\n{h['content']}\")\n"
+        "    return \"\".join(parts), ids\n"
+        "\n"
+        "\n"
+        "def update_skill_outcomes(skill_ids, verified):\n"
+        "    \"\"\"Close the loop the review said never closes: runs that used a skill feed the\n"
+        "    skill's own record, and the lifecycle transition runs on the new counts.\"\"\"\n"
+        "    for sid in skill_ids:\n"
+        "        with conn.cursor() as cur:\n"
+        "            cur.execute(\"\"\"UPDATE HARNESS_SKILLS SET uses = uses + 1,\n"
+        "                           verified_successes = verified_successes + :vs,\n"
+        "                           failures = failures + :f, updated_at = CURRENT_TIMESTAMP\n"
+        "                         WHERE skill_id = :sid\"\"\",\n"
+        "                        vs=1 if verified else 0, f=0 if verified else 1, sid=sid)\n"
+        "            cur.execute(\"\"\"SELECT status, verified_successes, failures\n"
+        "                             FROM HARNESS_SKILLS WHERE skill_id = :sid\"\"\", sid=sid)\n"
+        "            status, vs, fl = cur.fetchone()\n"
+        "            new_status = improve.lifecycle_transition(status, vs, fl)\n"
+        "            if new_status != status:\n"
+        "                cur.execute(\"UPDATE HARNESS_SKILLS SET status = :s WHERE skill_id = :sid\",\n"
+        "                            s=new_status, sid=sid)\n"
+        "                print(f\"  skill {sid}: {status} -> {new_status}\")\n"
+        "        conn.commit()\n"
+        "\n"
+        "ok(\"skill retrieval + lifecycle ready\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
+# Section: the demo arc
+# --------------------------------------------------------------------------
+DEMO = [
+    md(
+        "## 8 · The arc: recur → verify → harvest → earn approval\n\n"
+        "Three inspectors phrase the same corrosion-triage task differently. Watch the gray\n"
+        "band merge them, the judge verify them, and the harvester fire at three verified\n"
+        "occurrences. Then a fourth task *uses* the provisional skill - and its verified\n"
+        "outcomes promote it to approved."
+    ),
+    code(
+        "print(f\"=== Occurrence 1 ({ASSET_A}) ===\")\n"
+        "r1 = run_and_learn(\n"
+        "    f\"Inspect {ASSET_A}: heavy corrosion on the bearing plates at pier 2. Assess severity\"\n"
+        "    \" against past findings and record a finding with your recommendation.\",\n"
+        "    use_skills=False)"
+    ),
+    code(
+        "print(f\"=== Occurrence 2 ({ASSET_A}, new phrasing) ===\")\n"
+        "r2 = run_and_learn(\n"
+        "    f\"Corrosion check on {ASSET_A} bearings - compare with prior reports and log what\"\n"
+        "    \" you find with a recommendation.\",\n"
+        "    inspector=\"T_Vance\", use_skills=False)"
+    ),
+    code(
+        "print(f\"=== Occurrence 3 ({ASSET_B}, same task type, different asset) ===\")\n"
+        "r3 = run_and_learn(\n"
+        "    f\"{ASSET_B} shows surface rust and section loss on load-bearing members; triage\"\n"
+        "    \" against history and file a finding.\",\n"
+        "    inspector=\"K_Osei\", use_skills=False)"
+    ),
+    code(
+        "# The registry after three occurrences: one workflow row, merged by meaning.\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"\"\"SELECT workflow_id, occurrences, verified_successes, failures, promoted\n"
+        "                     FROM HARNESS_WORKFLOW\"\"\")\n"
+        "    for row in cur.fetchall():\n"
+        "        print(row)"
+    ),
+    code(
+        "print(\"=== Harvest ===\")\n"
+        "new_skills = harvest()\n"
+        "check(len(new_skills) >= 1, f\"harvested {len(new_skills)} provisional skill(s)\")\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"SELECT skill_id, name, status FROM HARNESS_SKILLS\")\n"
+        "    for row in cur.fetchall():\n"
+        "        print(row)"
+    ),
+    code(
+        "# Show the distilled SKILL.md - grounded in the real trajectory, not confabulated.\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"SELECT content FROM HARNESS_SKILLS FETCH FIRST 1 ROWS ONLY\")\n"
+        "    _content = cur.fetchone()[0]\n"
+        "print(_content.read() if hasattr(_content, 'read') else _content)"
+    ),
+    code(
+        "print(f\"=== Using the provisional skill (run 1) ===\")\n"
+        "r4 = run_and_learn(\n"
+        "    f\"New corrosion report on {ASSET_A}: pitting on expansion-joint anchor bolts.\"\n"
+        "    \" Triage against history and record a finding.\",\n"
+        "    inspector=\"J_Ibarra\")\n"
+        "check(len(r4[\"run\"][\"skill_ids\"]) >= 1, \"provisional skill was retrieved and used\")"
+    ),
+    code(
+        "print(f\"=== Using the skill again (run 2) - promotion happens here if both verified ===\")\n"
+        "r5 = run_and_learn(\n"
+        "    f\"{ASSET_B}: corrosion staining under deck drainage outlets. Check history, then\"\n"
+        "    \" record a finding with recommendation.\",\n"
+        "    inspector=\"R_Mercer\")\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"SELECT skill_id, name, status, uses, verified_successes FROM HARNESS_SKILLS\")\n"
+        "    for row in cur.fetchall():\n"
+        "        print(row)"
+    ),
+    code(
+        "# Retrieval thresholds in action: an off-topic task injects NO skills, no tools.\n"
+        "manifest, ids = build_skill_manifest(\"plan the office holiday party\")\n"
+        "check(manifest == \"\" and ids == [], \"off-topic query injects no skills\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
+# Section: closing
+# --------------------------------------------------------------------------
+CLOSING = [
+    md(
+        "## 9 · What you built (vs. what the review criticised)\n\n"
+        "| Review gap | This notebook |\n"
+        "|---|---|\n"
+        "| Trajectory = sorted set of tool names | Ordered steps with args + truncated results |\n"
+        "| `success = bool(final)` | LLM judge audits trajectory **and database evidence** |\n"
+        "| Brittle 0.15 dedup cutoff | Gray band + LLM same-task confirmation |\n"
+        "| One-way promotion, max authority | Provisional → approved/retired via linked outcomes |\n"
+        "| No staleness handling | Schema fingerprint checked at retrieval |\n"
+        "| Unconditional top-k injection | Distance thresholds on tools *and* skills |\n\n"
+        "Next: **02 - Scheduled briefings**, where the *other* promotion path (scratch →\n"
+        "long-term memory) gets the same treatment: opt-in curation, provenance, supersession,\n"
+        "and a consumer that is actually scheduled."
+    ),
+    code(
+        "for desc, passed in verify(conn, \"01_self_improving_copilot\"):\n"
+        "    check(passed, desc)\n"
+        "ok(\"notebook 01 artifacts in place - continue to 02_scheduled_briefings\")"
+    ),
+]
+
+SECTIONS = [INTRO, SETUP, BOOTSTRAP, REGISTRY_DDL, TOOLBOX_SEC, AGENT_LOOP, JUDGE, CAPTURE, SKILLS_SEC, DEMO, CLOSING]
 
 
 def build() -> nbf.NotebookNode:
