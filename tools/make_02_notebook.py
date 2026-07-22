@@ -1,0 +1,255 @@
+"""Regenerate notebooks/02_scheduled_briefings_complete.ipynb.
+
+Run: .venv/bin/python tools/make_02_notebook.py
+Later plan tasks append sections; keep SECTIONS ordered.
+"""
+
+import nbformat as nbf
+
+
+def md(src):
+    return nbf.v4.new_markdown_cell(src)
+
+
+def code(src):
+    return nbf.v4.new_code_cell(src)
+
+
+# --------------------------------------------------------------------------
+# Section: intro
+# --------------------------------------------------------------------------
+INTRO = [
+    md(
+        "# 02 - Scheduled Briefings: promotion that curates, remembers where it came\n"
+        "from, and runs without you\n\n"
+        "Notebook 01 fixed how the harness learns *procedures*. This notebook fixes the\n"
+        "other promotion path - scratch notes graduating into long-term memory - which the\n"
+        "review summarised as *\"promotion without curation, growth without forgetting\"*:\n\n"
+        "| Review gap (Path 1) | This notebook |\n"
+        "|---|---|\n"
+        "| Everything graduates within the hour | **Opt-in** `/inbox` + an LLM **triage gate** (keep / discard / hold) |\n"
+        "| 200-word chunks re-extracted by the LLM | **Whole-note promotion**, verbatim (`extract_memories=False`) |\n"
+        "| No provenance, nothing supersedes | A **queryable sidecar** (source path, revision, supersession links) |\n"
+        "| Consumer never actually scheduled | In-DB **DBMS_SCHEDULER** producer + drainable consumer + **queue-depth health check** |\n"
+        "| (bonus) persistence-of-one-fact only | **Continuity of work**: a new session resumes the briefing *plan*, not just facts |\n\n"
+        "The payoff: a **morning asset-risk briefing** the database assembles on schedule -\n"
+        "the LLM narrates the numbers; it never invents them."
+    ),
+]
+
+# --------------------------------------------------------------------------
+# Section: setup
+# --------------------------------------------------------------------------
+SETUP = [
+    md("## 0 · Setup\n\nConnect, verify notebook 01's artifacts, check privileges, stand up the embedder."),
+    code(
+        "import array\n"
+        "import json\n"
+        "import uuid\n"
+        "\n"
+        "from cityops_harness.checks import ok, check\n"
+        "from cityops_harness.config import load_settings\n"
+        "from cityops_harness.db import get_connection\n"
+        "from cityops_harness.llm import chat_model, litellm_spec\n"
+        "from cityops_harness.state import require, verify\n"
+        "from cityops_harness.tracing import init_tracing\n"
+        "from cityops_harness import promote\n"
+        "\n"
+        "settings = load_settings()\n"
+        "conn = get_connection(settings)\n"
+        "require(conn, \"01_self_improving_copilot\")\n"
+        "CHAT = chat_model(settings)\n"
+        "HANDLER = init_tracing(settings)\n"
+        "ok(f\"connected - provider={settings.llm_provider}, langfuse={settings.langfuse_mode}\")"
+    ),
+    code(
+        "# The scheduled pipeline needs two privileges most ADB users lack by default.\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"SELECT privilege FROM user_sys_privs\")\n"
+        "    _privs = {r[0] for r in cur.fetchall()}\n"
+        "_missing = {\"CREATE PROCEDURE\", \"CREATE JOB\"} - _privs\n"
+        "check(not _missing,\n"
+        "      f\"scheduler privileges present (run as ADMIN if missing: \"\n"
+        "      + \"; \".join(f'GRANT {p} TO {settings.db_user}' for p in sorted(_missing)) + \")\"\n"
+        "      if _missing else \"scheduler privileges present (CREATE PROCEDURE, CREATE JOB)\")"
+    ),
+    code(
+        "import asyncio\n"
+        "import numpy as np\n"
+        "from langchain_oracledb.embeddings.oracleai import OracleEmbeddings\n"
+        "from oracleagentmemory.apis.embedders.embedder import IEmbedder\n"
+        "\n"
+        "\n"
+        "class OracleONNXEmbedder(IEmbedder):\n"
+        "    def __init__(self, conn, model_name):\n"
+        "        self.provider = OracleEmbeddings(\n"
+        "            conn=conn, params={\"provider\": \"database\", \"model\": model_name}\n"
+        "        )\n"
+        "\n"
+        "    def embed(self, texts, *, is_query=False):\n"
+        "        return np.asarray(self.provider.embed_documents(list(texts)), dtype=np.float32)\n"
+        "\n"
+        "    async def embed_async(self, texts, *, is_query=False):\n"
+        "        return await asyncio.to_thread(self.embed, texts, is_query=is_query)\n"
+        "\n"
+        "\n"
+        "embedder = OracleONNXEmbedder(conn, settings.embed_model)\n"
+        "check(embedder.embed([\"hello\"]).shape == (1, 384), \"in-database embedder ready\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
+# Section: SDK init (first live use) - whole notes, no re-extraction
+# --------------------------------------------------------------------------
+SDK_INIT = [
+    md(
+        "## 1 · The Agent Memory SDK - configured for *whole-note* promotion\n\n"
+        "`extract_memories=False` is a deliberate review fix, not a shortcut: the original\n"
+        "pipeline chunked files into 200-word windows and had the LLM *re-interpret* each one\n"
+        "at ingest - confident misreadings of mid-sentence fragments became durable facts.\n"
+        "Here a curated note is stored **verbatim** as one memory; the triage gate (next\n"
+        "section) is where judgement happens, *before* anything is durable."
+    ),
+    code(
+        "from oracleagentmemory.core import OracleAgentMemory, SchemaPolicy\n"
+        "from oracleagentmemory.core.llms.llm import Llm as SdkLlm\n"
+        "\n"
+        "memory = OracleAgentMemory(\n"
+        "    connection=conn,\n"
+        "    embedder=embedder,\n"
+        "    llm=SdkLlm(**litellm_spec(settings)),\n"
+        "    extract_memories=False,\n"
+        "    schema_policy=SchemaPolicy.CREATE_IF_NECESSARY,\n"
+        "    table_name_prefix=\"CITY_\",\n"
+        ")\n"
+        "\n"
+        "# Round-trip smoke test: store, find, delete.\n"
+        "_mid = memory.add_memory(\"smoke test memory - safe to delete\",\n"
+        "                         memory_type=\"fact\", user_id=\"_smoke\", agent_id=\"CITY\")\n"
+        "_hits = memory.search(\"smoke test\", user_id=\"_smoke\", agent_id=\"CITY\", max_results=1)\n"
+        "check(len(_hits) == 1 and _hits[0].id == _mid, \"SDK add_memory/search round-trip\")\n"
+        "memory.delete_memory(_mid)\n"
+        "ok(\"OracleAgentMemory ready (CITY_ tables, whole-note mode)\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
+# Section: scratch store + seed notes
+# --------------------------------------------------------------------------
+SCRATCH = [
+    md(
+        "## 2 · The scratchpad: cheap to write, safe to be wrong in\n\n"
+        "A plain table posing as a tiny filesystem. Inspectors jot notes all day; only\n"
+        "`/inbox/<asset>/...` is a promotion *candidate area*. Working files - drafts,\n"
+        "abandoned queries, tool dumps - live outside it and are **never** promoted, which\n"
+        "restores the scratchpad's contract the review showed the old pipeline destroyed."
+    ),
+    code(
+        "def _table_exists(name):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"SELECT COUNT(*) FROM user_tables WHERE table_name = :t\", t=name)\n"
+        "        return cur.fetchone()[0] > 0\n"
+        "\n"
+        "\n"
+        "if not _table_exists(\"HARNESS_SCRATCH\"):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"CREATE TABLE HARNESS_SCRATCH (\n"
+        "            path       VARCHAR2(512) PRIMARY KEY,\n"
+        "            content    CLOB NOT NULL,\n"
+        "            revision   VARCHAR2(64) NOT NULL,\n"
+        "            status     VARCHAR2(1) DEFAULT 'N'\n"
+        "                       CHECK (status IN ('N','S','P','D','H')),\n"
+        "            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)\"\"\")\n"
+        "    conn.commit()\n"
+        "\n"
+        "\n"
+        "def write_note(path, content):\n"
+        "    rev = promote.note_revision(content)\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"DELETE FROM HARNESS_SCRATCH WHERE path = :p\", p=path)\n"
+        "        cur.execute(\"\"\"INSERT INTO HARNESS_SCRATCH (path, content, revision, status)\n"
+        "                       VALUES (:p, :c, :r, 'N')\"\"\", p=path, c=content, r=rev)\n"
+        "    conn.commit()\n"
+        "    return rev\n"
+        "\n"
+        "\n"
+        "def read_note(path):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"SELECT content, revision, status FROM HARNESS_SCRATCH WHERE path = :p\",\n"
+        "                    p=path)\n"
+        "        row = cur.fetchone()\n"
+        "    if row is None:\n"
+        "        return None\n"
+        "    content = row[0].read() if hasattr(row[0], \"read\") else row[0]\n"
+        "    return {\"path\": path, \"content\": content, \"revision\": row[1], \"status\": row[2]}\n"
+        "\n"
+        "\n"
+        "def list_notes(prefix=\"/\"):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"SELECT path, status FROM HARNESS_SCRATCH\n"
+        "                       WHERE path LIKE :p ORDER BY path\"\"\", p=prefix + \"%\")\n"
+        "        return cur.fetchall()\n"
+        "\n"
+        "\n"
+        "def set_note_status(path, status):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"UPDATE HARNESS_SCRATCH SET status = :s WHERE path = :p\",\n"
+        "                    s=status, p=path)\n"
+        "    conn.commit()\n"
+        "\n"
+        "ok(\"scratch store ready\")"
+    ),
+    code(
+        "from pathlib import Path\n"
+        "\n"
+        "_data_dir = Path(\"data\") if Path(\"data\").exists() else Path(\"../data\")\n"
+        "with open(_data_dir / \"maintenance_logs.json\") as f:\n"
+        "    _logs = json.load(f)\n"
+        "_asset_names = sorted({x[\"asset_name\"] for x in _logs})\n"
+        "ASSET_A = \"Harbor Bridge\" if \"Harbor Bridge\" in _asset_names else _asset_names[0]\n"
+        "\n"
+        "# Seed the inbox with real field narratives (non-routine first - richer signal),\n"
+        "# and the review's own cautionary trio OUTSIDE the inbox.\n"
+        "_candidates = [l for l in _logs if l[\"asset_name\"] == ASSET_A and l[\"severity\"] != \"routine\"]\n"
+        "_candidates += [l for l in _logs if l[\"asset_name\"] == ASSET_A and l[\"severity\"] == \"routine\"]\n"
+        "INBOX_SEED = []\n"
+        "for i, log in enumerate(_candidates[:4]):\n"
+        "    path = f\"/inbox/{ASSET_A}/{i}.md\"\n"
+        "    INBOX_SEED.append((path, log[\"narrative\"], log[\"days_ago\"]))\n"
+        "    write_note(path, log[\"narrative\"])\n"
+        "\n"
+        "SUPERSEDE_DEFECT_PATH = f\"/inbox/{ASSET_A}/defect-bearing.md\"\n"
+        "SUPERSEDE_REPAIR_PATH = f\"/inbox/{ASSET_A}/repair-bearing.md\"\n"
+        "write_note(SUPERSEDE_DEFECT_PATH,\n"
+        "           f\"Bearing plates at pier 2 of {ASSET_A} show active corrosion with \"\n"
+        "           \"measurable section loss. Load rating review recommended; monitor monthly.\")\n"
+        "\n"
+        "write_note(\"/work/draft_notes.md\",\n"
+        "           \"TODO: check if the load rating includes the retrofit?? probably not\")\n"
+        "write_note(\"/work/attempt1_wrong.sql\",\n"
+        "           \"SELECT asset, COUNT(*) FROM findings GROUP BY severity  -- wrong, abandoned\")\n"
+        "write_note(\"/tool_out/similar_dump.json\", json.dumps({\"rows\": list(range(50))}))\n"
+        "\n"
+        "for p, s in list_notes(\"/\"):\n"
+        "    print(f\"{s}  {p}\")\n"
+        "ok(f\"{len(INBOX_SEED) + 1} inbox candidates, 3 working files (outside the inbox)\")"
+    ),
+]
+
+SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH]
+
+
+def build() -> nbf.NotebookNode:
+    nb = nbf.v4.new_notebook()
+    nb.metadata["kernelspec"] = {
+        "name": "harness",
+        "display_name": "CityOps Harness",
+        "language": "python",
+    }
+    nb["cells"] = [cell for section in SECTIONS for cell in section]
+    return nb
+
+
+if __name__ == "__main__":
+    nbf.write(build(), "notebooks/02_scheduled_briefings_complete.ipynb")
+    print("wrote notebooks/02_scheduled_briefings_complete.ipynb")
