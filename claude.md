@@ -13,10 +13,22 @@ engineering → 04 evals.
 - Phase plans: `docs/superpowers/plans/` (one per phase; the checkboxes in each
   plan are the progress record — there is no separate ledger).
 
-Status at last update (2026-07-22): foundation and phase 01 complete. Phase 02
-tasks 1–6 complete; **task 7 (live run) is blocked** — `ANANT` lacks
-`CREATE PROCEDURE` and `CREATE JOB`, which an ADMIN must grant. Phase 03 tasks
-1–6 complete (notebook 03 generated, both flavors); task 7 is the live run.
+Status at last update (2026-07-22): foundation and phase 01 complete. Phase 03
+complete and verified live end-to-end (all 7 tasks).
+
+**Phase 02 is tasks 1–4 only** — an earlier status line here claimed 1–6, which
+was wrong: `tools/make_02_notebook.py` has `SECTIONS = [INTRO, SETUP, SDK_INIT,
+SCRATCH, TRIAGE, PROMOTION]`, i.e. plan tasks 3 and 4, and there are no commits
+for tasks 5 or 6. Still to build: **task 5** (in-DB staging procedure, the two
+DBMS_SCHEDULER jobs, queue-depth health check, briefing automation) and **task
+6** (supersession demo, recency-weighted recall, continuity-of-work, closing
+state check). Task 7's live run then has something to verify — as of the
+2026-07-22 run it executes cleanly to the end of what exists (zero errors, all
+checks green) but `HARNESS_PROMOTION_QUEUE`, `HARNESS_BRIEFING` and the
+scheduler jobs are still absent, so `state.verify("02_scheduled_briefings")`
+cannot pass. The `CREATE PROCEDURE`/`CREATE JOB` grants that used to block this
+are now in place.
+
 All work is on `main`; the `foundation` branch is history.
 
 ## Key decisions (do not re-litigate)
