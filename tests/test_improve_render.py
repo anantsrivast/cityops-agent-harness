@@ -60,3 +60,12 @@ def test_trajectory_to_text_orders_and_truncates():
     assert text.index("Step 1: find_similar_findings") < text.index("Step 2: log_finding")
     assert "truncated 300 chars" in text
     assert '"severity": "high"' in text
+
+
+def test_parse_tolerates_dashes_inside_values():
+    text = render_skill_md(
+        name="s", description="triage --- with dashes", tools=["t"],
+        when_to_use="when", steps_body="1. do",
+        source_workflow_id="w", schema_sha="x",
+    )
+    assert parse_skill_md(text)["description"] == "triage --- with dashes"

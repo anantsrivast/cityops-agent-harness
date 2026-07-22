@@ -47,12 +47,13 @@ def render_skill_md(
 
 
 def parse_skill_md(text: str) -> dict:
-    if not text.startswith("---"):
+    if not text.startswith("---\n"):
         raise ValueError("skill document missing frontmatter")
-    try:
-        _, front, body = text.split("---", 2)
-    except ValueError as exc:
-        raise ValueError("skill document missing frontmatter close") from exc
+    closing = text.find("\n---\n", 4)
+    if closing == -1:
+        raise ValueError("skill document missing frontmatter close")
+    front = text[4:closing]
+    body = text[closing + 5:]
 
     meta: dict = {}
     for line in front.strip().splitlines():
