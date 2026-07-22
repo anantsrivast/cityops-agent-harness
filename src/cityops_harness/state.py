@@ -73,7 +73,21 @@ REGISTRY: dict[str, list[ArtifactCheck]] = {
             ),
         ),
     ],
-    # Notebooks 01-04 register their artifacts here in later phases.
+    "03_context_engineering": [
+        ArtifactCheck(
+            description="simulated season transcript HARNESS_TRANSCRIPT",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_TRANSCRIPT'",
+        ),
+        ArtifactCheck(
+            description="versioned compaction cards HARNESS_CARD",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_CARD'",
+        ),
+        ArtifactCheck(
+            description="offloaded tool-result store HARNESS_BLOB",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_BLOB'",
+        ),
+    ],
+    # Notebook 04 registers its artifacts here in the next phase.
 }
 
 

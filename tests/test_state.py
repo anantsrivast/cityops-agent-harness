@@ -80,3 +80,11 @@ def test_registry_seeds_notebook_02():
               "HARNESS_BRIEFING", "CITY_MEMORY"):
         assert t in sqls
     assert "user_scheduler_jobs" in sqls
+
+
+def test_registry_seeds_notebook_03():
+    checks = REGISTRY["03_context_engineering"]
+    sqls = " ".join(c.sql for c in checks)
+    assert len(checks) == 3
+    for t in ("HARNESS_TRANSCRIPT", "HARNESS_CARD", "HARNESS_BLOB"):
+        assert t in sqls
