@@ -107,7 +107,8 @@ cells.append(nbf.v4.new_code_cell(
     "    traced = chat_model(settings).invoke(\n"
     "        \"Say: traced\", config={\"callbacks\": [handler]}\n"
     "    )\n"
-    "    handler.client.flush()\n"
+    "    from langfuse import get_client\n"
+    "    get_client().flush()\n"
     "    ok(f\"trace sent to Langfuse ({settings.langfuse_mode}) - \"\n"
     "       \"check the UI for a '00_setup' trace\")"
 ))
