@@ -56,7 +56,7 @@ Set `LLM_PROVIDER` in `.env`:
 |---|---|---|
 | `anthropic` | `ANTHROPIC_API_KEY` | default; model `claude-opus-4-8` |
 | `openai` | `OPENAI_API_KEY` | model `gpt-4o` |
-| `ollama` | local Ollama + `ollama pull qwen3` | tool-capable model required; CPU Codespaces are slow but correct |
+| `ollama` | local Ollama + `ollama pull qwen3` | tool-capable model required; in Codespaces install first (`curl -fsSL https://ollama.com/install.sh | sh`); CPU runs are slow but correct |
 
 ## Langfuse
 
