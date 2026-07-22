@@ -44,6 +44,35 @@ REGISTRY: dict[str, list[ArtifactCheck]] = {
             sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_SKILLS'",
         ),
     ],
+    "02_scheduled_briefings": [
+        ArtifactCheck(
+            description="scratch note store HARNESS_SCRATCH",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_SCRATCH'",
+        ),
+        ArtifactCheck(
+            description="promotion queue HARNESS_PROMOTION_QUEUE",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_PROMOTION_QUEUE'",
+        ),
+        ArtifactCheck(
+            description="provenance sidecar HARNESS_MEMORY_META",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_MEMORY_META'",
+        ),
+        ArtifactCheck(
+            description="briefing store HARNESS_BRIEFING",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_BRIEFING'",
+        ),
+        ArtifactCheck(
+            description="SDK long-term memory table CITY_MEMORY",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'CITY_MEMORY'",
+        ),
+        ArtifactCheck(
+            description="scheduled HARNESS jobs registered",
+            sql=(
+                "SELECT COUNT(*) FROM user_scheduler_jobs "
+                "WHERE job_name IN ('HARNESS_STAGE_JOB', 'HARNESS_BRIEFING_JOB')"
+            ),
+        ),
+    ],
     # Notebooks 01-04 register their artifacts here in later phases.
 }
 

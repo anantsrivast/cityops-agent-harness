@@ -70,3 +70,13 @@ def test_registry_seeds_notebook_01():
     assert "HARNESS_WORKFLOW" in sqls
     assert "HARNESS_SKILLS" in sqls
     assert "domain data" in descs
+
+
+def test_registry_seeds_notebook_02():
+    checks = REGISTRY["02_scheduled_briefings"]
+    sqls = " ".join(c.sql for c in checks)
+    assert len(checks) == 6
+    for t in ("HARNESS_SCRATCH", "HARNESS_PROMOTION_QUEUE", "HARNESS_MEMORY_META",
+              "HARNESS_BRIEFING", "CITY_MEMORY"):
+        assert t in sqls
+    assert "user_scheduler_jobs" in sqls
