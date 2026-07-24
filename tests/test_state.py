@@ -88,3 +88,11 @@ def test_registry_seeds_notebook_03():
     assert len(checks) == 3
     for t in ("HARNESS_TRANSCRIPT", "HARNESS_CARD", "HARNESS_BLOB"):
         assert t in sqls
+
+
+def test_registry_seeds_notebook_04():
+    checks = REGISTRY["04_evals"]
+    sqls = " ".join(c.sql for c in checks)
+    assert len(checks) == 2
+    assert "HARNESS_EVAL" in sqls
+    assert "5" in sqls  # the >=5 distinct-evals gate

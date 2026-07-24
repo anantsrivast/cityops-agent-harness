@@ -87,7 +87,17 @@ REGISTRY: dict[str, list[ArtifactCheck]] = {
             sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_BLOB'",
         ),
     ],
-    # Notebook 04 registers its artifacts here in the next phase.
+    "04_evals": [
+        ArtifactCheck(
+            description="eval results store HARNESS_EVAL",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_EVAL'",
+        ),
+        ArtifactCheck(
+            description="at least five evals recorded",
+            sql="SELECT COUNT(*) FROM (SELECT DISTINCT eval_name FROM HARNESS_EVAL) "
+                "HAVING COUNT(*) >= 5",
+        ),
+    ],
 }
 
 
