@@ -100,8 +100,12 @@ services:
       - langfuse_clickhouse_data:/var/lib/clickhouse
       - langfuse_clickhouse_logs:/var/log/clickhouse-server
     ports:
-      - 127.0.0.1:8123:8123
-      - 127.0.0.1:9000:9000
+      # Host-published for human clickhouse-client/debug access only; every service
+      # reaches ClickHouse over the compose network (clickhouse:8123 / :9000), not
+      # these. Remapped off 8123/9000 because those defaults collide readily on a
+      # shared dev host (9000 in particular - minio and stray Jupyter ZMQ ports).
+      - 127.0.0.1:18123:8123
+      - 127.0.0.1:19000:9000
     healthcheck:
       test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
       interval: 5s

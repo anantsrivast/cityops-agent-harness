@@ -66,9 +66,17 @@ All work is on `main`; the `foundation` branch is history.
   reads like the database is down even though the console shows it Available.
 - `langfuse` needs the `langchain` meta-package importable, not just
   `langchain-core` — declared in `pyproject.toml`.
-- Langfuse score delivery live (local mode) not yet verified; the compose stack
-  has never been started in this container. Every notebook must stay green with
-  `LANGFUSE_MODE=off`.
+- Langfuse live score delivery **VERIFIED** (2026-07-24): local compose stack up,
+  langfuse **4.14.1** (OTEL-based). Dataset+score linkage uses the **Experiments
+  API** — `dataset.run_experiment(name=, task=, evaluators=[Evaluation(...)])`;
+  the older `item.run()` / `start_as_current_span` idioms do NOT exist in 4.x.
+  Compose fix applied: ClickHouse host ports remapped 9000→19000, 8123→18123 in
+  `docker-compose.langfuse.yml` (9000 collides with minio and stray Jupyter ZMQ
+  ports on a shared host); internal networking unaffected.
+- Notebooks 00–03 stay green with `LANGFUSE_MODE=off`. **Notebook 04 (evals)
+  requires Langfuse** (`LANGFUSE_MODE=local` + the stack up) by design — the spec
+  mandates datasets with scored traces. Stop the stack with
+  `docker compose -f docker-compose.langfuse.yml -f docker-compose.langfuse.override.yml down`.
 - Codespaces boot validation in progress (recovery-mode causes fixed:
   moby:false, dropped ollama devcontainer feature).
 - Confirm the Ollama `qwen3` tag supports tool calling.
