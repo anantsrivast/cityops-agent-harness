@@ -15,7 +15,7 @@ actually works.
 | `notebooks/01_self_improving_copilot_complete.ipynb` (+ `_todo`) | Tool registry, verified workflow capture, skill harvesting with lifecycle |
 | `notebooks/02_scheduled_briefings_complete.ipynb` (+ `_todo`) | Curated whole-note promotion, provenance + supersession, DBMS_SCHEDULER pipeline, morning briefing |
 | `notebooks/03_context_engineering_complete.ipynb` (+ `_todo`) | Compaction with a card-fidelity probe, agent-in-the-loop offloading, blobs barred from promotion |
-| `notebooks/04_evals` | Five Langfuse evals across model and memory |
+| `notebooks/04_evals_complete.ipynb` (+ `_todo`) | Five Langfuse evals: promotion precision, skill fidelity, skills-help, card fidelity over horizon, cost per correct |
 
 Notebooks 01-04 come in two flavors: `*_complete.ipynb` (full solutions) and
 generated `*_todo.ipynb` (fill in the marked gaps; regenerate with

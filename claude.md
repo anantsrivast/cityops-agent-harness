@@ -13,9 +13,11 @@ engineering → 04 evals.
 - Phase plans: `docs/superpowers/plans/` (one per phase; the checkboxes in each
   plan are the progress record — there is no separate ledger).
 
-Status at last update (2026-07-22): **foundation and phases 01, 02 and 03 are
-complete**, each verified live end-to-end against the ADB with zero errors.
-Next up is phase 04 (evals) — no plan document exists for it yet.
+Status at last update (2026-07-24): **the whole series (foundation + notebooks
+00–04) is complete**, each verified live end-to-end with zero cell errors.
+Phase 04 (evals) runs its five evals as Langfuse datasets with scored traces via
+the 4.x Experiments API; the local Langfuse stack must be up (see below).
+Remaining deferred work: strength-based card consolidation (design spec).
 
 The `CREATE PROCEDURE` / `CREATE JOB` grants are in place, and
 `HARNESS_STAGE_JOB` (hourly) and `HARNESS_BRIEFING_JOB` (daily 06:00) are left
