@@ -102,6 +102,73 @@ def merge_card(card: dict, update: dict) -> dict:
     return merged
 
 
+def fact_strength(
+    reinforcements: int, turns_since_reference: int, half_life_turns: float = 8.0
+) -> float:
+    """How firmly a fact is held: reinforcement raises it, disuse decays it.
+
+    `strength = (1 + reinforcements) * 0.5 ** (turns_since_reference / half_life)`.
+    Same half-life shape as `promote.rerank_by_recency`, deliberately, so the
+    codebase carries one decay model. This is the piece TTL eviction gets wrong:
+    survival tracks *retrieval strength*, not arrival time, so a fact referenced
+    again and again outlives a newer one nobody ever needed.
+    """
+    return (1 + reinforcements) * 0.5 ** (turns_since_reference / half_life_turns)
+
+
+def select_for_eviction(
+    card: dict,
+    current_turn: int,
+    ceiling_chars: int = 4_000,
+    floor_facts: int = 3,
+    half_life_turns: float = 8.0,
+) -> tuple[dict, list[dict]]:
+    """Trim a card back under its size ceiling by evicting the weakest facts.
+
+    Returns `(kept_card, evicted_facts)`. A card only compresses if something
+    forces it to; this is that force. Facts leave weakest-first by
+    `fact_strength` (ties broken oldest-first, then by id, so the result is
+    deterministic), and never below `floor_facts` however over-budget the card
+    is. The caller consolidates the evicted facts into `gist` rather than
+    dropping them outright - forgetting the specifics, keeping the shape.
+    """
+    kept = {**card, "facts": list(card.get("facts", []))}
+    evicted: list[dict] = []
+
+    def weakest_first(fact: dict) -> tuple[float, int, str]:
+        last_seen = fact.get("last_seen", fact.get("turn", 0))
+        strength = fact_strength(
+            fact.get("reinforcements", 0), current_turn - last_seen, half_life_turns
+        )
+        return (strength, fact.get("turn", 0), str(fact.get("id", "")))
+
+    while len(kept["facts"]) > floor_facts and len(render_card(kept)) > ceiling_chars:
+        victim = min(kept["facts"], key=weakest_first)
+        kept["facts"].remove(victim)
+        evicted.append(victim)
+    return kept, evicted
+
+
+def fact_status(planted_ids: list[str], card: dict) -> dict[str, str]:
+    """Classify each planted fact as verbatim / gist / lost.
+
+    The measure a hit/miss recall cannot express: a fact consolidated into gist
+    still answers "which bridge?" but no longer "which pier?". Verbatim beats
+    gist beats lost when a fact somehow appears in both.
+    """
+    verbatim = {f["id"] for f in card.get("facts", [])}
+    in_gist = {gid for entry in card.get("gist", []) for gid in entry.get("ids", [])}
+    status: dict[str, str] = {}
+    for pid in planted_ids:
+        if pid in verbatim:
+            status[pid] = "verbatim"
+        elif pid in in_gist:
+            status[pid] = "gist"
+        else:
+            status[pid] = "lost"
+    return status
+
+
 def card_fidelity(planted_ids: list[str], card: dict) -> tuple[list[str], list[str], float]:
     """Did the card still hold the planted facts when they were finally needed?
 

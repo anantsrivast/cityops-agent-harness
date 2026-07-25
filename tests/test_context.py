@@ -5,6 +5,8 @@ from cityops_harness.context import (
     blob_reference,
     card_fidelity,
     compaction_due,
+    fact_status,
+    fact_strength,
     is_offloaded_blob,
     merge_card,
     new_blob_id,
@@ -12,6 +14,7 @@ from cityops_harness.context import (
     parse_blob_references,
     parse_card,
     render_card,
+    select_for_eviction,
 )
 
 
@@ -97,3 +100,64 @@ def test_card_fidelity_reports_the_planted_fact_that_fell_out():
 
 def test_card_fidelity_of_an_empty_plant_set_is_perfect():
     assert card_fidelity([], {"facts": [], "decisions": [], "open_questions": []})[2] == 1.0
+
+
+# --- strength-based consolidation (deferred design, design spec) -----------
+
+def test_fact_strength_decays_by_half_life_and_grows_with_reinforcement():
+    assert fact_strength(0, 0) == 1.0
+    assert fact_strength(0, 8, half_life_turns=8.0) == 0.5      # one half-life
+    assert fact_strength(1, 8, half_life_turns=8.0) == 1.0      # reinforcement offsets a half-life
+    assert fact_strength(3, 0) == 4.0
+
+
+def test_reinforced_old_fact_beats_stale_recent_one():
+    # a fact referenced twice, 16 turns ago, outranks an untouched one 8 turns ago
+    assert fact_strength(2, 16, 8.0) > fact_strength(0, 8, 8.0)
+
+
+def _card(facts, gist=None):
+    return {"facts": facts, "decisions": [], "open_questions": [], "gist": gist or []}
+
+
+def test_select_for_eviction_noop_when_under_ceiling():
+    card = _card([{"id": "f1", "text": "short", "turn": 1}])
+    kept, evicted = select_for_eviction(card, current_turn=5, ceiling_chars=10_000)
+    assert evicted == []
+    assert kept["facts"] == card["facts"]
+
+
+def test_select_for_eviction_drops_weakest_until_under_ceiling():
+    facts = [{"id": f"f{i}", "text": "x" * 200, "turn": i} for i in range(1, 8)]
+    kept, evicted = select_for_eviction(_card(facts), current_turn=20,
+                                        ceiling_chars=800, floor_facts=2)
+    assert len(kept["facts"]) >= 2                      # floor respected
+    assert len(kept["facts"]) + len(evicted) == len(facts)
+    assert len(render_card(kept)) <= 800 or len(kept["facts"]) == 2
+    # oldest / weakest go first: f1 evicted before f7 survives
+    kept_ids = {f["id"] for f in kept["facts"]}
+    assert "f7" in kept_ids and "f1" not in kept_ids
+
+
+def test_select_for_eviction_keeps_reinforced_fact_over_older_neighbours():
+    facts = [{"id": f"f{i}", "text": "x" * 200, "turn": i} for i in range(1, 6)]
+    facts[0]["reinforcements"] = 5          # f1 is old but strongly reinforced
+    facts[0]["last_seen"] = 5
+    kept, evicted = select_for_eviction(_card(facts), current_turn=6,
+                                        ceiling_chars=500, floor_facts=1)
+    assert "f1" in {f["id"] for f in kept["facts"]}
+
+
+def test_select_for_eviction_respects_floor_even_when_over_ceiling():
+    facts = [{"id": f"f{i}", "text": "x" * 500, "turn": i} for i in range(1, 6)]
+    kept, evicted = select_for_eviction(_card(facts), current_turn=10,
+                                        ceiling_chars=100, floor_facts=3)
+    assert len(kept["facts"]) == 3          # cannot go below the floor
+
+
+def test_fact_status_three_way():
+    card = {"facts": [{"id": "f1", "text": "kept", "turn": 1}],
+            "decisions": [], "open_questions": [],
+            "gist": [{"ids": ["f2"], "text": "a few things happened"}]}
+    status = fact_status(["f1", "f2", "f3"], card)
+    assert status == {"f1": "verbatim", "f2": "gist", "f3": "lost"}
