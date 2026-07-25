@@ -33,6 +33,9 @@ kept in this repo for reference - unmodified).
 2. Create a Codespace. The devcontainer installs everything and unpacks the wallet.
 3. Fill any gaps in `.env`, then run `notebooks/00_setup.ipynb`.
 
+Full walkthrough — secrets, `.env`, the Langfuse UI, and teardown — in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Quick start (local)
 
 ```bash
