@@ -6,17 +6,60 @@ document is the Codespaces path end to end.
 
 ## 1 · Start in Codespaces
 
-1. **Add Codespaces secrets** first (repo → Settings → Secrets and variables →
-   Codespaces). The devcontainer reads these at create time:
+1. **Add Codespaces secrets** first. The devcontainer reads these at create
+   time; they are injected into the Codespace as environment variables (see
+   [§2.1](#21--how-secrets-reach-the-app) for why that matters):
 
    | Secret | Required? | What it is |
    |---|---|---|
-   | `WALLET_B64` | yes | base64 of your ADB wallet zip — `base64 -w0 wallet.zip` (macOS: `base64 -i wallet.zip`) |
+   | `WALLET_B64` | yes | base64 of your ADB wallet zip — see the encoding step below |
    | `DB_PASSWORD` | yes | the database user's password |
    | `WALLET_PASSWORD` | yes | password set when the wallet was downloaded from OCI |
    | `ANTHROPIC_API_KEY` | per provider | needed when `LLM_PROVIDER=anthropic` (the default) |
    | `OPENAI_API_KEY` | per provider | needed when `LLM_PROVIDER=openai` |
    | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | only for `cloud` | paste from langfuse.com; **not** needed for local Langfuse |
+
+   ### Encode the wallet for `WALLET_B64`
+
+   Download your ADB wallet from OCI (a `Wallet_*.zip`), then base64-encode the
+   **zip itself** into a single line — `post-create.sh` decodes it and unzips it
+   into `wallet/`:
+
+   ```bash
+   base64 -w0 Wallet_ANANT.zip > wallet.b64      # Linux
+   base64 -i  Wallet_ANANT.zip | tr -d '\n' > wallet.b64   # macOS
+   ```
+
+   The secret value is the contents of `wallet.b64` (paste the whole string).
+
+   ### Create the secrets — web UI
+
+   Repo → **Settings** → **Secrets and variables** → **Codespaces** → **New
+   repository secret**. Add each row above (Name = the secret name, Secret = the
+   value). For a value that spans a line — `WALLET_B64` — paste the whole string
+   into the Secret box.
+
+   > Prefer to keep secrets off the repo? Add them at the **account** level
+   > instead: github.com → your avatar → **Settings** → **Codespaces** →
+   > **Repository access**, and grant this repository access to each secret.
+   > Account-level secrets work across all your Codespaces; repo-level secrets
+   > are scoped to this repo. Either is fine — the devcontainer reads whatever
+   > ends up in the environment.
+
+   ### Create the secrets — `gh` CLI
+
+   ```bash
+   gh secret set WALLET_B64      --app codespaces < wallet.b64
+   gh secret set DB_PASSWORD     --app codespaces        # prompts for the value
+   gh secret set WALLET_PASSWORD --app codespaces
+   gh secret set ANTHROPIC_API_KEY --app codespaces
+   gh secret list --app codespaces                       # verify
+   ```
+
+   > **Secrets apply on the next start.** If you add or change a secret while a
+   > Codespace is already running, it won't pick it up until you **stop and
+   > start** that Codespace (Code → Codespaces → ⋯ → Stop), or rebuild the
+   > container. New Codespaces get them immediately.
 
 2. **Create the Codespace** (Code → Codespaces → Create). On first boot
    [`.devcontainer/post-create.sh`](../.devcontainer/post-create.sh) runs
@@ -59,6 +102,28 @@ green check.
 
 Notebooks **00–03 run with `LANGFUSE_MODE=off`**. Only **notebook 04 (evals)
 requires Langfuse** — set `LANGFUSE_MODE=local` and bring up the stack below.
+
+### 2.1 · How secrets reach the app
+
+Worth understanding, because `.env` and the secrets look like they overlap but
+don't:
+
+- **Codespaces injects each secret as an environment variable** into the
+  container — it never writes them into `.env`. `WALLET_B64` is consumed by
+  `post-create.sh` at build time; the rest sit in the environment.
+- **`.env` is only the non-secret config** (`DB_DSN`, `LLM_PROVIDER`,
+  `LANGFUSE_MODE`). `post-create.sh` seeds it from `.env.example`, so it starts
+  with *placeholders* like `DB_PASSWORD=change_me`.
+- **The real value wins.** `load_settings()` calls `load_dotenv()`, which
+  defaults to `override=False` — it will not overwrite a variable already in the
+  environment. So the injected `DB_PASSWORD` beats the `.env` placeholder;
+  `.env` is a fallback, not the source of truth.
+- **Locally it's the reverse:** no injected variables, so you paste real values
+  into your hand-edited `.env` and the same code reads them from there.
+
+Corollary: if a secret is **missing**, nothing overrides the placeholder and the
+app silently uses `change_me`, surfacing as an auth failure — the fix is *add the
+secret*, not edit `.env`.
 
 ## 3 · Langfuse UI (local, self-hosted)
 
