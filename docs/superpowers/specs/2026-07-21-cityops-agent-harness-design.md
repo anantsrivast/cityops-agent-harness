@@ -161,10 +161,17 @@ Each phase is its own plan → implement → review cycle:
 4. **03 context engineering**
 5. **04 evals**
 
-## Deferred: strength-based card consolidation
+## Strength-based card consolidation
 
-**Status:** designed, not implemented. Revisit after phase 04. Nothing below
-exists in code.
+**Status:** IMPLEMENTED (2026-07-24), verified live. Pure helpers
+(`fact_strength`, `select_for_eviction`, `fact_status`) are in
+`cityops_harness.context` with offline tests; the demonstration is notebook
+03 §4b ("Making it forget, on purpose"). Live result: over the same 40-turn
+season the additive card grew to ~16k chars while the strength-based card held
+its 4k ceiling (~3.9k), and `fact_status` reported every planted fact as
+verbatim/gist/lost rather than hit/miss — facts that faded to gist answered
+coarse questions but not always their specifics (a measured, not hidden, loss).
+The original design follows, for the record.
 
 ### Why
 

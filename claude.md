@@ -56,10 +56,12 @@ All work is on `main`; the `foundation` branch is history.
 
 ## Known carry-overs / untested
 
-- **Deferred design, not built:** strength-based card consolidation (notebook
-  03's card never compresses — it is additive and has no ceiling). Full design,
-  including why TTL eviction is the wrong answer, is in the design spec under
-  *Deferred: strength-based card consolidation*. Revisit after phase 04.
+- **Strength-based card consolidation: BUILT** (2026-07-24, live-verified).
+  Helpers `fact_strength` / `select_for_eviction` / `fact_status` in
+  `context.py`; demonstrated in notebook 03 §4b. The additive card (§3) is kept
+  on purpose as the "never compresses" setup; §4b adds a ceiling + reinforcement
+  + gist eviction that holds ~4k while additive runs to ~16k, scored three-way
+  (verbatim/gist/lost). Design write-up remains in the spec.
 - **Blocked on ADMIN:** `GRANT CREATE PROCEDURE TO ANANT;` and
   `GRANT CREATE JOB TO ANANT;` — phase 02 task 7 cannot run without them.
   Notebook 03 deliberately needs neither.
