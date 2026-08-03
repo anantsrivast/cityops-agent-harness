@@ -368,6 +368,46 @@ REGISTRY_DDL = [
         "SCHEMA_SHA = current_schema_sha()\n"
         "ok(f\"schema fingerprint {SCHEMA_SHA[:12]}...\")"
     ),
+    md(
+        "**An inspector for the registries.** Defined once here and called after every cell\n"
+        "that writes, so you can watch rows appear, merge, and change status as you run.\n\n"
+        "- Right now everything is empty - this is the baseline to compare against.\n"
+        "- Watch three things as the notebook runs: `occurrences` climbing on **one**\n"
+        "  workflow row rather than spawning new ones, `promoted` flipping to `Y`, and a\n"
+        "  skill's `status` going `provisional → approved`."
+    ),
+    code(
+        "def show_registries(label=\"\", tools=False):\n"
+        "    \"\"\"Snapshot the harness registries. Call after any cell that writes to them.\"\"\"\n"
+        "    print(f\"===== {label} =====\" if label else \"=====\")\n"
+        "    if tools:\n"
+        "        with conn.cursor() as cur:\n"
+        "            cur.execute(\"SELECT name FROM HARNESS_TOOLS ORDER BY name\")\n"
+        "            names = [r[0] for r in cur.fetchall()]\n"
+        "        print(f\"HARNESS_TOOLS    ({len(names)}): {', '.join(names) or '(empty)'}\")\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"SELECT workflow_id, occurrences, verified_successes, failures,\n"
+        "                              promoted, intent\n"
+        "                         FROM HARNESS_WORKFLOW ORDER BY created_at\"\"\")\n"
+        "        wf = cur.fetchall()\n"
+        "    print(f\"HARNESS_WORKFLOW ({len(wf)} row(s))\")\n"
+        "    for wid, occ, vs, fl, pr, intent in wf:\n"
+        "        text = intent.read() if hasattr(intent, \"read\") else (intent or \"\")\n"
+        "        print(f\"   {wid}  occurrences={occ} verified={vs} failed={fl} promoted={pr}\")\n"
+        "        print(f\"      intent: {text[:70]}\")\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"SELECT skill_id, status, uses, verified_successes, failures,\n"
+        "                              schema_sha, name\n"
+        "                         FROM HARNESS_SKILLS ORDER BY created_at\"\"\")\n"
+        "        sk = cur.fetchall()\n"
+        "    print(f\"HARNESS_SKILLS   ({len(sk)} row(s))\")\n"
+        "    for sid, status, uses, vs, fl, ssha, name in sk:\n"
+        "        print(f\"   {sid}  {status:<11} uses={uses} verified={vs} failed={fl}\"\n"
+        "              f\"  schema={(ssha or '')[:8]}  {name}\")\n"
+        "    print()\n"
+        "\n"
+        "show_registries(\"baseline - registries exist, nothing learned yet\", tools=True)"
+    ),
 ]
 
 # --------------------------------------------------------------------------
@@ -477,6 +517,11 @@ TOOLBOX_SEC = [
         "check(retrieve_tools(\"what is the weather tomorrow in Paris?\") == [],\n"
         "      \"off-topic query injects no tools\")"
     ),
+    md(
+        "**Registry check.** `HARNESS_TOOLS` now holds the three capabilities. The other two\n"
+        "registries are still empty - tools are *declared*, workflows and skills are *learned*."
+    ),
+    code("show_registries(\"after tool registration\", tools=True)"),
 ]
 
 # --------------------------------------------------------------------------
@@ -1027,6 +1072,11 @@ DEMO = [
         "    use_skills=False)"
     ),
     md(
+        "**Registry check.** First workflow row, `occurrences=1`, `verified=1`, `promoted=N`.\n"
+        "`HARNESS_SKILLS` is still empty - one run is an episode, not a pattern."
+    ),
+    code("show_registries(\"after occurrence 1\")"),
+    md(
         "**Occurrence 2 - the same task, reworded.** Watch the workflow id: it should match\n"
         "occurrence 1's. A *new* id means the paraphrase landed past the gray band and the\n"
         "task split silently - the failure mode §6 admits it only narrows."
@@ -1038,6 +1088,12 @@ DEMO = [
         "    \" you find with a recommendation.\",\n"
         "    inspector=\"T_Vance\", use_skills=False)"
     ),
+    md(
+        "**Registry check - the merge.** Still **one** row, now `occurrences=2`. Same\n"
+        "`workflow_id` as the last check means the reworded task was recognised as the same\n"
+        "recurring task. A second row here would be the silent split."
+    ),
+    code("show_registries(\"after occurrence 2 - merged, not split\")"),
     md(
         "**Occurrence 3 - same task type, different asset.** The hard merge. Distance alone\n"
         "will not settle this one, so it falls into the gray band and the LLM decides whether\n"
@@ -1055,14 +1111,7 @@ DEMO = [
         "`verified_successes=3`, `failures=0`, `promoted='N'` - which is exactly what clears\n"
         "the harvest gate on the next cell."
     ),
-    code(
-        "# The registry after three occurrences: one workflow row, merged by meaning.\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"\"\"SELECT workflow_id, occurrences, verified_successes, failures, promoted\n"
-        "                     FROM HARNESS_WORKFLOW\"\"\")\n"
-        "    for row in cur.fetchall():\n"
-        "        print(row)"
-    ),
+    code("show_registries(\"after 3 occurrences - the harvest gate is now satisfied\")"),
     md(
         "**Harvest.** The gate passes, the stored trajectory is distilled, the faithfulness\n"
         "check runs, and a skill lands as `provisional` - never approved on creation."
@@ -1070,12 +1119,15 @@ DEMO = [
     code(
         "print(\"=== Harvest ===\")\n"
         "new_skills = harvest()\n"
-        "check(len(new_skills) >= 1, f\"harvested {len(new_skills)} provisional skill(s)\")\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"SELECT skill_id, name, status FROM HARNESS_SKILLS\")\n"
-        "    for row in cur.fetchall():\n"
-        "        print(row)"
+        "check(len(new_skills) >= 1, f\"harvested {len(new_skills)} provisional skill(s)\")"
     ),
+    md(
+        "**Registry check - the phase change.** Two things moved at once: the workflow's\n"
+        "`promoted` flipped to `Y` (so it is never harvested twice), and the first\n"
+        "`HARNESS_SKILLS` row appeared as `provisional` with `uses=0`.\n\n"
+        "Note the `schema=` prefix - that is the fingerprint the skill was distilled against."
+    ),
+    code("show_registries(\"after harvest - workflow promoted, skill born provisional\")"),
     md(
         "**The distilled artifact.** Read the frontmatter as provenance: `tools` lists what\n"
         "actually ran, `source_workflow` points back at the evidence it came from, and\n"
@@ -1102,6 +1154,12 @@ DEMO = [
         "check(len(r4[\"run\"][\"skill_ids\"]) >= 1, \"provisional skill was retrieved and used\")"
     ),
     md(
+        "**Registry check - outcomes flow back.** The skill now shows `uses=1` and\n"
+        "`verified=1`: the run that consumed it fed its own verdict back into the skill's\n"
+        "record. Status is still `provisional` - promotion needs two."
+    ),
+    code("show_registries(\"after skill use 1 - counters moving, still provisional\")"),
+    md(
         "**Second use - promotion fires here.** Two verified uses with zero failures flips the\n"
         "skill `provisional → approved`. Authority is earned by linked outcomes, not granted\n"
         "at creation - the loop the promotion review said never closes."
@@ -1111,12 +1169,16 @@ DEMO = [
         "r5 = run_and_learn(\n"
         "    f\"{ASSET_B}: corrosion staining under deck drainage outlets. Check history, then\"\n"
         "    \" record a finding with recommendation.\",\n"
-        "    inspector=\"R_Mercer\")\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"SELECT skill_id, name, status, uses, verified_successes FROM HARNESS_SKILLS\")\n"
-        "    for row in cur.fetchall():\n"
-        "        print(row)"
+        "    inspector=\"R_Mercer\")"
     ),
+    md(
+        "**Registry check - authority earned.** `uses=2`, `verified=2`, `failed=0`, and\n"
+        "`status` is now **approved**. Nothing approved this skill except its own track\n"
+        "record: two verified runs that used it, with no failures.\n\n"
+        "Compare against the baseline snapshot in §2 - every row on screen was written by the\n"
+        "harness while you ran the notebook."
+    ),
+    code("show_registries(\"after skill use 2 - provisional -> approved\")"),
     md(
         "**The threshold, proved negatively.** An off-topic query returns an empty manifest.\n"
         "Retrieval that injects *nothing* is the whole point of the distance cutoff - the\n"
