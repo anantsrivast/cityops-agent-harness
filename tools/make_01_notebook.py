@@ -96,6 +96,12 @@ BOOTSTRAP = [
         "The system of record from the CityOps lab, loaded idempotently: the asset registry and\n"
         "~inspection findings with in-database embeddings. Re-running this section is safe."
     ),
+    md(
+        "**Load the asset registry.** Reads the two workshop JSON files, derives the asset\n"
+        "list, and classifies each asset by keyword.\n\n"
+        "- `CITY_ASSET` is created only if absent, so re-running is a no-op.\n"
+        "- `get_asset` is the read path that §3 wraps as an agent tool."
+    ),
     code(
         "from pathlib import Path\n"
         "\n"
@@ -140,6 +146,14 @@ BOOTSTRAP = [
         "    return {\"asset_id\": row[0], \"asset_class\": row[1]} if row else None\n"
         "\n"
         "ok(f\"{len(_asset_names)} assets registered\")"
+    ),
+    md(
+        "**Load the findings corpus, with embeddings.** Creates\n"
+        "`CITY_INSPECTION_FINDING`, then embeds and inserts up to `DEMO_FINDING_COUNT`\n"
+        "(60) findings drawn from the inspection reports.\n\n"
+        "- Embeddings are computed **inside** the database - no text egress, no API cost.\n"
+        "- The HNSW index is wrapped in `try/except`: it speeds up search but is not required.\n"
+        "- Skipped entirely when rows already exist."
     ),
     code(
         "import os\n"
@@ -199,6 +213,16 @@ BOOTSTRAP = [
         "    conn.commit()\n"
         "    _existing = len(rows)\n"
         "ok(f\"{_existing} findings in the system of record\")"
+    ),
+    md(
+        "**The two domain operations, plus the demo's asset picks.** `log_finding` writes a\n"
+        "finding and embeds its description on the way in; `find_similar_findings` does the\n"
+        "cosine top-k search, optionally filtered by asset or category.\n\n"
+        "- Both are plain Python here - §3 wraps them as agent tools.\n"
+        "- `ASSET_B` is deliberately chosen from the same asset *class* as `ASSET_A`, so §8's\n"
+        "  corrosion task makes sense against both. An unrelated pick makes the model either\n"
+        "  refuse to log a nonsensical finding or invent an `asset_id` that breaks the\n"
+        "  foreign key."
     ),
     code(
         "def log_finding(asset_id, inspector, category, severity, description,\n"
@@ -270,6 +294,15 @@ REGISTRY_DDL = [
         "- `HARNESS_SKILLS` - distilled `SKILL.md` documents with a **lifecycle** "
         "(provisional → approved | retired), linked back to outcomes via `skill_id`"
     ),
+    md(
+        "**Create the three registries the harness writes to as it learns.**\n\n"
+        "- `HARNESS_TOOLS` - the capability catalogue, with an embedded description per tool.\n"
+        "- `HARNESS_WORKFLOW` - one row per *recurring task type*; `occurrences`,\n"
+        "  `verified_successes` and `failures` are what the harvest gate reads.\n"
+        "- `HARNESS_SKILLS` - distilled procedures; `status` carries the lifecycle\n"
+        "  (provisional → approved → retired) and `schema_sha` the provenance.\n"
+        "- Every `CREATE TABLE` is guarded by `_table_exists`, so the section is idempotent."
+    ),
     code(
         "for ddl in [\n"
         "    \"\"\"CREATE TABLE HARNESS_TOOLS (\n"
@@ -314,6 +347,13 @@ REGISTRY_DDL = [
         "        conn.commit()\n"
         "ok(\"HARNESS_TOOLS / HARNESS_WORKFLOW / HARNESS_SKILLS ready\")"
     ),
+    md(
+        "**Fingerprint the domain schema.** Hashes every `CITY_*` column name and type into\n"
+        "one digest, stamped onto each skill at distillation and re-checked at retrieval.\n\n"
+        "- Columns are sorted before hashing, so the digest is order-independent.\n"
+        "- A mismatch only *labels* the skill `[STALE]` in the prompt - it does not retire it\n"
+        "  or remove it from retrieval."
+    ),
     code(
         "def current_schema_sha():\n"
         "    \"\"\"Fingerprint of the domain schema a skill was distilled against.\n"
@@ -339,6 +379,14 @@ TOOLBOX_SEC = [
         "Each LangChain tool is registered with an embedded description. At run time the\n"
         "agent loop retrieves only the tools relevant to the task - **with a distance\n"
         "threshold**, so an off-topic task injects nothing (one of the review's fixes)."
+    ),
+    md(
+        "**Declare the agent's three capabilities.** Thin `@tool` wrappers over §1's\n"
+        "functions.\n\n"
+        "- The docstring is what gets embedded and matched, so it is part of the interface,\n"
+        "  not a comment.\n"
+        "- `tool_log_finding` reads the module-level `CURRENT_INSPECTOR`, which §4 sets per run.\n"
+        "- `TOOLBOX` maps name → callable; §4 uses it to execute whatever the model asks for."
     ),
     code(
         "from langchain_core.tools import tool\n"
@@ -373,6 +421,17 @@ TOOLBOX_SEC = [
         "\n"
         "TOOLBOX = {t.name: t for t in [tool_find_similar_findings, tool_log_finding, tool_get_asset]}\n"
         "ok(f\"{len(TOOLBOX)} tools defined\")"
+    ),
+    md(
+        "**Register tools by meaning, then retrieve them with a floor.** Each tool's\n"
+        "`name: description` is embedded into `HARNESS_TOOLS`; `retrieve_tools` ranks by\n"
+        "cosine distance and cuts everything past `TOOL_DISTANCE_MAX`.\n\n"
+        "- The threshold is the point: an off-topic task binds *no* tools, rather than the\n"
+        "  least-bad four.\n"
+        "- 0.92 looks high because short, generic tool descriptions sit far from a task\n"
+        "  sentence. It was calibrated against the live embedder, not guessed.\n"
+        "- The two `check(...)` calls assert both directions - relevant retrieval, and an\n"
+        "  empty result for an unrelated query."
     ),
     code(
         "def register_tool(t):\n"
@@ -431,6 +490,18 @@ AGENT_LOOP = [
         "and a **truncated result**, in order. That trajectory is what the judge audits and\n"
         "what skills are distilled from."
     ),
+    md(
+        "**The act loop, and the trajectory it leaves behind.** Builds the system prompt\n"
+        "(plus any skill manifest), binds *only* the retrieved tools, then iterates:\n"
+        "model → tool calls → results → model, up to `max_iters`.\n\n"
+        "- Each step appends `{tool, args, truncated result}` - the record §5's judge audits\n"
+        "  and §7 distils skills from.\n"
+        "- A tool error becomes `ERROR: ...` text in the `ToolMessage` rather than a crash, so\n"
+        "  the model can recover and the failure stays visible in the trajectory.\n"
+        "- The model sees the **full** result; the trajectory stores the first 300 chars.\n"
+        "- The final `content` flatten exists because Anthropic returns a list of content\n"
+        "  blocks where OpenAI and Ollama return a plain string."
+    ),
     code(
         "from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage\n"
         "\n"
@@ -464,7 +535,9 @@ AGENT_LOOP = [
         "            break\n"
         "        for tc in resp.tool_calls:\n"
         "            try:\n"
-        "                result = str(TOOLBOX[tc[\"name\"]].invoke(tc[\"args\"]))\n"
+        "                # `cfg` carries the Langfuse callback: pass it here too, or the tool\n"
+        "                # executions run outside the trace and only the model calls are visible.\n"
+        "                result = str(TOOLBOX[tc[\"name\"]].invoke(tc[\"args\"], cfg))\n"
         "            except Exception as e:\n"
         "                # A tool error becomes ToolMessage content, not a crashed run: the\n"
         "                # model sees it and can recover, and the judge sees it in the trajectory.\n"
@@ -503,6 +576,17 @@ JUDGE = [
         "sees the task, the full trajectory, the final answer, **and the database evidence**\n"
         "(claimed writes are re-queried). Only a verified run feeds the workflow's success count -\n"
         "and every verdict is logged to Langfuse as a score when tracing is on."
+    ),
+    md(
+        "**Audit the run against the database, not the prose.** `build_evidence` re-queries\n"
+        "every finding the trajectory claims to have written *and* every finding_id cited in\n"
+        "the final answer, marking each `EXISTS` or `NOT FOUND`. The judge sees task,\n"
+        "trajectory, answer, and that evidence.\n\n"
+        "- Structured output makes `verified` a real bool, not text to be parsed.\n"
+        "- Interpretive judgement (severity reasoning, recommendations) explicitly passes;\n"
+        "  fabricated records and uncited actions explicitly fail.\n"
+        "- `record_score` attaches the verdict to the run's own Langfuse trace, so the score\n"
+        "  is not orphaned. It no-ops silently when tracing is off."
     ),
     code(
         "from pydantic import BaseModel\n"
@@ -601,6 +685,18 @@ CAPTURE = [
         "One residual limitation stays open, on purpose: a phrasing beyond the `new` boundary\n"
         "still splits silently - the gray band narrows the failure mode, it does not eliminate\n"
         "it. Notebook 04's evals measure how often that actually happens."
+    ),
+    md(
+        "**Fold this run into an existing workflow, or start a new one.** Nearest-neighbour\n"
+        "on the intent embedding, then `merge_decision` splits three ways: merge below 0.15,\n"
+        "new above 0.40, and an LLM same-task check for the band between.\n\n"
+        "- Only a **verified** run increments `verified_successes`; an unverified one\n"
+        "  increments `failures`. That is what stops a repeatedly-failing task from being\n"
+        "  harvested.\n"
+        "- On merge, `steps` is overwritten with the latest verified trajectory - the one §7\n"
+        "  will distil.\n"
+        "- `run_and_learn` is the full cycle: act → judge → score → capture → feed skill\n"
+        "  outcomes, all inside one trace."
     ),
     code(
         "class SameTask(BaseModel):\n"
@@ -730,6 +826,17 @@ SKILLS_SEC = [
         "- retrieval applies a **distance threshold**, injects **approved before provisional**,\n"
         "  and flags **stale** skills whose schema no longer matches"
     ),
+    md(
+        "**Distil a recurring workflow into a `SKILL.md` - if it earns it.** `harvest_ready`\n"
+        "gates on three signals at once: at least 3 occurrences, at least 2 verified\n"
+        "successes, and more successes than failures.\n\n"
+        "- Distillation reads the **full trajectory** (args and results), not a set of tool\n"
+        "  names, so the procedure can be grounded in what actually happened.\n"
+        "- A second model call checks the distilled steps back against that trajectory;\n"
+        "  unfaithful output is rejected and nothing is written.\n"
+        "- Every skill is born `provisional` and stamped with `SCHEMA_SHA`. Promotion is\n"
+        "  earned later, in §8."
+    ),
     code(
         "class Distilled(BaseModel):\n"
         "    name: str\n"
@@ -816,6 +923,16 @@ SKILLS_SEC = [
         "\n"
         "ok(\"harvester ready\")"
     ),
+    md(
+        "**Two-level retrieval, and the loop that finally closes.** `retrieve_skills` cuts at\n"
+        "`SKILL_DISTANCE_MAX`; `build_skill_manifest` sorts approved ahead of provisional and\n"
+        "labels each with the authority it has actually earned.\n\n"
+        "- An approved skill is introduced as \"prefer this approach\"; a provisional one as an\n"
+        "  unproven candidate to verify. Same retrieval, different prompt authority.\n"
+        "- `update_skill_outcomes` feeds each run's verdict back to the skills that run used,\n"
+        "  then `lifecycle_transition` applies it: approved at 2 verified successes with zero\n"
+        "  failures, retired at 2 failures."
+    ),
     code(
         "# Calibrated the same way as TOOL_DISTANCE_MAX: measured live, a task phrased\n"
         "# differently from the skill's distilled name/description can sit just past a\n"
@@ -898,12 +1015,21 @@ DEMO = [
         "occurrences. Then a fourth task *uses* the provisional skill - and its verified\n"
         "outcomes promote it to approved."
     ),
+    md(
+        "**Occurrence 1 - the unaided baseline.** No skills exist yet, and `use_skills=False`\n"
+        "makes that explicit. Expect a brand-new `HARNESS_WORKFLOW` row and `verified=True`."
+    ),
     code(
         "print(f\"=== Occurrence 1 ({ASSET_A}) ===\")\n"
         "r1 = run_and_learn(\n"
         "    f\"Inspect {ASSET_A}: heavy corrosion on the bearing plates at pier 2. Assess severity\"\n"
         "    \" against past findings and record a finding with your recommendation.\",\n"
         "    use_skills=False)"
+    ),
+    md(
+        "**Occurrence 2 - the same task, reworded.** Watch the workflow id: it should match\n"
+        "occurrence 1's. A *new* id means the paraphrase landed past the gray band and the\n"
+        "task split silently - the failure mode §6 admits it only narrows."
     ),
     code(
         "print(f\"=== Occurrence 2 ({ASSET_A}, new phrasing) ===\")\n"
@@ -912,12 +1038,22 @@ DEMO = [
         "    \" you find with a recommendation.\",\n"
         "    inspector=\"T_Vance\", use_skills=False)"
     ),
+    md(
+        "**Occurrence 3 - same task type, different asset.** The hard merge. Distance alone\n"
+        "will not settle this one, so it falls into the gray band and the LLM decides whether\n"
+        "\"same procedure, different asset\" counts as the same recurring task."
+    ),
     code(
         "print(f\"=== Occurrence 3 ({ASSET_B}, same task type, different asset) ===\")\n"
         "r3 = run_and_learn(\n"
         "    f\"Inspect {ASSET_B}: surface rust and section loss on the bearing members. Assess\"\n"
         "    \" severity against past findings and record a finding with your recommendation.\",\n"
         "    inspector=\"K_Osei\", use_skills=False)"
+    ),
+    md(
+        "**The registry after three runs.** One row - `occurrences=3`,\n"
+        "`verified_successes=3`, `failures=0`, `promoted='N'` - which is exactly what clears\n"
+        "the harvest gate on the next cell."
     ),
     code(
         "# The registry after three occurrences: one workflow row, merged by meaning.\n"
@@ -926,6 +1062,10 @@ DEMO = [
         "                     FROM HARNESS_WORKFLOW\"\"\")\n"
         "    for row in cur.fetchall():\n"
         "        print(row)"
+    ),
+    md(
+        "**Harvest.** The gate passes, the stored trajectory is distilled, the faithfulness\n"
+        "check runs, and a skill lands as `provisional` - never approved on creation."
     ),
     code(
         "print(\"=== Harvest ===\")\n"
@@ -936,12 +1076,22 @@ DEMO = [
         "    for row in cur.fetchall():\n"
         "        print(row)"
     ),
+    md(
+        "**The distilled artifact.** Read the frontmatter as provenance: `tools` lists what\n"
+        "actually ran, `source_workflow` points back at the evidence it came from, and\n"
+        "`schema_sha` records the world it was distilled against."
+    ),
     code(
         "# Show the distilled SKILL.md - grounded in the real trajectory, not confabulated.\n"
         "with conn.cursor() as cur:\n"
         "    cur.execute(\"SELECT content FROM HARNESS_SKILLS FETCH FIRST 1 ROWS ONLY\")\n"
         "    _content = cur.fetchone()[0]\n"
         "print(_content.read() if hasattr(_content, 'read') else _content)"
+    ),
+    md(
+        "**First use of the provisional skill.** `use_skills` defaults to `True`, so the\n"
+        "manifest is injected - labelled as unproven, to be verified against fresh data. A\n"
+        "verified outcome here counts toward promotion."
     ),
     code(
         "print(f\"=== Using the provisional skill (run 1) ===\")\n"
@@ -950,6 +1100,11 @@ DEMO = [
         "    \" Triage against history and record a finding.\",\n"
         "    inspector=\"J_Ibarra\")\n"
         "check(len(r4[\"run\"][\"skill_ids\"]) >= 1, \"provisional skill was retrieved and used\")"
+    ),
+    md(
+        "**Second use - promotion fires here.** Two verified uses with zero failures flips the\n"
+        "skill `provisional → approved`. Authority is earned by linked outcomes, not granted\n"
+        "at creation - the loop the promotion review said never closes."
     ),
     code(
         "print(f\"=== Using the skill again (run 2) - promotion happens here if both verified ===\")\n"
@@ -961,6 +1116,11 @@ DEMO = [
         "    cur.execute(\"SELECT skill_id, name, status, uses, verified_successes FROM HARNESS_SKILLS\")\n"
         "    for row in cur.fetchall():\n"
         "        print(row)"
+    ),
+    md(
+        "**The threshold, proved negatively.** An off-topic query returns an empty manifest.\n"
+        "Retrieval that injects *nothing* is the whole point of the distance cutoff - the\n"
+        "alternative is top-k always finding something."
     ),
     code(
         "# Retrieval thresholds in action: an off-topic task injects NO skills, no tools.\n"
@@ -986,6 +1146,10 @@ CLOSING = [
         "Next: **02 - Scheduled briefings**, where the *other* promotion path (scratch →\n"
         "long-term memory) gets the same treatment: opt-in curation, provenance, supersession,\n"
         "and a consumer that is actually scheduled."
+    ),
+    md(
+        "**Cross-notebook state check.** Asserts that the artifacts notebook 02 depends on are\n"
+        "actually in place, so a broken hand-off fails here rather than three notebooks later."
     ),
     code(
         "for desc, passed in verify(conn, \"01_self_improving_copilot\"):\n"
