@@ -1220,7 +1220,133 @@ CLOSING = [
     ),
 ]
 
-SECTIONS = [INTRO, SETUP, BOOTSTRAP, REGISTRY_DDL, TOOLBOX_SEC, AGENT_LOOP, JUDGE, CAPTURE, SKILLS_SEC, DEMO, CLOSING]
+# --------------------------------------------------------------------------
+# Section: closing the loop - the copilot as a memory producer
+# --------------------------------------------------------------------------
+PRODUCER = [
+    md(
+        "## 8b · Closing the loop: the copilot as a memory *producer*\n\n"
+        "So far the copilot records **findings** (into `CITY_INSPECTION_FINDING`) and learns\n"
+        "**skills**. What it does *not* yet do is decide what is worth *remembering* - the\n"
+        "scratch notes that notebook 02's promotion pipeline curates. Notebook 02 hand-seeds\n"
+        "those notes; here is where they would really come from.\n\n"
+        "The design choice worth noticing: the agent is **never told about directories**. It\n"
+        "gets one `remember(asset_id, note, durable)` tool and judges only *is this worth\n"
+        "keeping?*. The **tool** owns the convention - `durable=True` files to `/inbox` (the\n"
+        "opt-in area notebook 02 promotes from), `durable=False` to `/work` (scratch, never\n"
+        "promoted). Placement is policy; the agent only supplies judgement."
+    ),
+    md(
+        "**The `remember` tool.** Backed by the same `HARNESS_SCRATCH` schema notebook 02\n"
+        "reads (created here if absent), so a note filed by this copilot is a note that\n"
+        "notebook's pipeline can pick up unchanged. The path is derived, never chosen by the\n"
+        "model."
+    ),
+    code(
+        "import re\n"
+        "from cityops_harness import promote\n"
+        "from langchain_core.tools import tool\n"
+        "\n"
+        "with conn.cursor() as cur:\n"
+        "    try:\n"
+        "        cur.execute(\"\"\"CREATE TABLE HARNESS_SCRATCH (\n"
+        "            path       VARCHAR2(512) PRIMARY KEY,\n"
+        "            content    CLOB NOT NULL,\n"
+        "            revision   VARCHAR2(64) NOT NULL,\n"
+        "            status     VARCHAR2(1) DEFAULT 'N'\n"
+        "                       CHECK (status IN ('N','S','P','D','H')),\n"
+        "            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)\"\"\")\n"
+        "    except Exception as e:\n"
+        "        if \"ORA-00955\" not in str(e):   # 'name already used' = already there\n"
+        "            raise\n"
+        "\n"
+        "\n"
+        "def _slug(text):\n"
+        "    return re.sub(r\"[^a-z0-9]+\", \"-\", text.lower()).strip(\"-\")[:40] or \"note\"\n"
+        "\n"
+        "\n"
+        "@tool\n"
+        "def remember(asset_id: str, note: str, durable: bool) -> str:\n"
+        "    \"\"\"File a note for long-term memory curation.\n"
+        "    durable=True  -> a completed, keep-worthy finding (enters the promotion inbox).\n"
+        "    durable=False -> scratch reasoning or a dead end (kept OUT of long-term memory).\n"
+        "    Returns the path it was filed under. You never choose the path.\"\"\"\n"
+        "    path = f\"/inbox/{asset_id}/{_slug(note)}.md\" if durable else f\"/work/{_slug(note)}.md\"\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"DELETE FROM HARNESS_SCRATCH WHERE path = :p\", p=path)\n"
+        "        cur.execute(\"INSERT INTO HARNESS_SCRATCH (path, content, revision) \"\n"
+        "                    \"VALUES (:p, :c, :r)\", p=path, c=note, r=promote.note_revision(note))\n"
+        "    conn.commit()\n"
+        "    return path\n"
+        "\n"
+        "ok(\"remember() ready - the tool owns placement; the agent only judges durable vs not\")"
+    ),
+    md(
+        "**Run the producer.** The copilot gets its usual tools *plus* `remember`, and a prompt\n"
+        "that asks it to keep durable findings and discard scratch - in those words, not in\n"
+        "directory names. Watch the `remember(... durable=True/False ...)` calls: the model\n"
+        "decides worth, the tool decides where."
+    ),
+    code(
+        "from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage\n"
+        "\n"
+        "PRODUCER_PROMPT = (\n"
+        "    \"You are the CityOps inspection copilot, now also responsible for what gets\\n\"\n"
+        "    \"remembered. Do the task through your tools. Before you finish, call remember():\\n\"\n"
+        "    \"  - durable=True for each completed, keep-worthy finding (one short paragraph);\\n\"\n"
+        "    \"  - durable=False for scratch reasoning or a dead end you do NOT want kept.\\n\"\n"
+        "    \"You never choose folders or paths - remember() files each note where it belongs.\"\n"
+        ")\n"
+        "\n"
+        "PRODUCER_TOOLS = {**TOOLBOX, \"remember\": remember}\n"
+        "_pmodel = CHAT.bind_tools(list(PRODUCER_TOOLS.values()))\n"
+        "_cfg = {\"callbacks\": [HANDLER]} if HANDLER else {}\n"
+        "task = (f\"Inspect {ASSET_A} pier 2 for bearing-plate corrosion: check similar past\"\n"
+        "        f\" findings first, record a finding if the evidence warrants it, and remember\"\n"
+        "        f\" what matters (and explicitly discard your scratch reasoning).\")\n"
+        "msgs = [SystemMessage(content=PRODUCER_PROMPT), HumanMessage(content=task)]\n"
+        "\n"
+        "for _ in range(6):\n"
+        "    resp = _pmodel.invoke(msgs, config=_cfg)\n"
+        "    msgs.append(resp)\n"
+        "    if not getattr(resp, \"tool_calls\", None):\n"
+        "        break\n"
+        "    for tc in resp.tool_calls:\n"
+        "        try:\n"
+        "            result = str(PRODUCER_TOOLS[tc[\"name\"]].invoke(tc[\"args\"], _cfg))\n"
+        "        except Exception as e:\n"
+        "            result = f\"ERROR: {type(e).__name__}: {e}\"\n"
+        "        if tc[\"name\"] == \"remember\":\n"
+        "            print(f\"  remember(durable={tc['args'].get('durable')}) -> {result}\")\n"
+        "        else:\n"
+        "            print(f\"  {tc['name']}(...) = {result[:60]}\")\n"
+        "        msgs.append(ToolMessage(content=result, tool_call_id=tc[\"id\"]))\n"
+        "\n"
+        "_ans = resp.content if isinstance(resp.content, str) else \"\".join(\n"
+        "    p.get(\"text\", \"\") if isinstance(p, dict) else str(p) for p in resp.content)\n"
+        "print(\"\\nagent:\", _ans.strip()[:280])"
+    ),
+    md(
+        "**What the agent filed.** The inbox notes here are exactly what notebook 02's\n"
+        "producer job would stage and its triage gate would curate - the two halves, connected."
+    ),
+    code(
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"SELECT path, status FROM HARNESS_SCRATCH ORDER BY path\")\n"
+        "    filed = cur.fetchall()\n"
+        "for path, status in filed:\n"
+        "    print(f\"  {status}  {path}\")\n"
+        "\n"
+        "inbox = [p for p, _ in filed if promote.triage_allowed(p)]\n"
+        "check(bool(inbox),\n"
+        "      f\"the copilot filed a durable note into the inbox: {inbox}\")\n"
+        "check(all(promote.triage_allowed(p) for p in inbox),\n"
+        "      \"every note the agent marked durable landed where notebook 02 will promote from\")\n"
+        "ok(\"producer wired - notebook 02's pipeline consumes exactly these /inbox notes\")"
+    ),
+]
+
+SECTIONS = [INTRO, SETUP, BOOTSTRAP, REGISTRY_DDL, TOOLBOX_SEC, AGENT_LOOP, JUDGE, CAPTURE, SKILLS_SEC, DEMO, PRODUCER, CLOSING]
 
 
 def build() -> nbf.NotebookNode:
