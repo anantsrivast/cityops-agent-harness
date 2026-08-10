@@ -1225,7 +1225,13 @@ conn.commit()
 EOF
 ```
 
-Note: promoted memories from prior attempts live in the SDK's `CITY_MEMORY`; orphans are acceptable (they lack sidecar rows so `recall` ignores them) — do not bulk-delete from CITY_MEMORY.
+Note (corrected 2026-07-25): earlier guidance said orphaned `CITY_MEMORY` rows were harmless because `recall` ignores them. That was wrong for **supersession**, which searches the SDK store directly: accumulated duplicate memories from prior runs crowd the real defect note out of the top-k search, so supersession silently stops firing and `§7` fails. Two fixes shipped — `promote_note` is now idempotent per `source_path` (no duplicate accumulation), and the reset **also clears the SDK memory store** rows. So the reset must additionally run, in this order (children before parent; never touch `CITY_INSPECTION_FINDING` / `CITY_ASSET`):
+
+```python
+for t in ("CITY_RECORD_CHUNKS", "CITY_MESSAGE", "CITY_MEMORY"):
+    try: cur.execute(f"DELETE FROM {t}")
+    except Exception: pass
+```
 
 - [ ] **Step 2: Execute live**
 
