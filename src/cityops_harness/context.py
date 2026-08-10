@@ -90,7 +90,12 @@ def merge_card(card: dict, update: dict) -> dict:
     """
     facts: dict[str, dict] = {f["id"]: f for f in card.get("facts", [])}
     for fact in update.get("facts", []):
-        facts[fact["id"]] = fact
+        fid = fact["id"]
+        # Merge, don't replace: the model re-emits the whole card each fold, so a
+        # wholesale overwrite would wipe strength bookkeeping (reinforcements,
+        # last_seen) that select_for_eviction depends on. The update's text/turn
+        # win; any accumulated metadata the update omits is preserved.
+        facts[fid] = {**facts[fid], **fact} if fid in facts else fact
 
     merged = {"facts": list(facts.values())}
     for section in ("decisions", "open_questions"):

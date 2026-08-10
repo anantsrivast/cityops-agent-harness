@@ -161,3 +161,19 @@ def test_fact_status_three_way():
             "gist": [{"ids": ["f2"], "text": "a few things happened"}]}
     status = fact_status(["f1", "f2", "f3"], card)
     assert status == {"f1": "verbatim", "f2": "gist", "f3": "lost"}
+
+
+def test_merge_card_preserves_strength_bookkeeping_on_relist():
+    # The model re-lists an existing fact each fold; its accumulated
+    # reinforcements/last_seen must survive, or the strength model resets to 0.
+    card = {"facts": [{"id": "f1", "text": "old", "turn": 4,
+                       "reinforcements": 2, "last_seen": 11}],
+            "decisions": [], "open_questions": []}
+    update = {"facts": [{"id": "f1", "text": "restated", "turn": 20}],
+              "decisions": [], "open_questions": []}
+    merged = merge_card(card, update)
+    f = merged["facts"][0]
+    assert f["text"] == "restated"          # update's content wins
+    assert f["turn"] == 20                   # and its turn
+    assert f["reinforcements"] == 2          # but bookkeeping survives
+    assert f["last_seen"] == 11
