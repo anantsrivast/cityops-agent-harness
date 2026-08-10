@@ -36,6 +36,9 @@ kept in this repo for reference - unmodified).
 Full walkthrough — secrets, `.env`, the Langfuse UI, and teardown — in
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+**New here?** [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) narrates the *why and how*
+of the whole project and each notebook, with diagrams.
+
 ## Quick start (local)
 
 ```bash
