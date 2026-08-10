@@ -134,6 +134,11 @@ SEASON = [
         "\n"
         "check(len(FINDINGS) > 20, f\"{len(FINDINGS)} real findings available to narrate\")"
     ),
+    md(
+        "**Build the season.** Three planted facts land on turns 4, 11 and 19; every other\n"
+        "turn is deterministic filler drawn from a real finding, so the 40-turn transcript is\n"
+        "identical on every run and the probe at the end is reproducible."
+    ),
     code(
         "# The three facts the probe will hunt for, and the turns they land on.\n"
         "PLANTED = {\n"
@@ -280,6 +285,12 @@ COMPACTION = [
         "\n"
         "ok(\"compaction step defined\")"
     ),
+    md(
+        "**Run the compaction loop.** Walk the season turn by turn; whenever the pending text\n"
+        "reaches the budget, fold it into the card and reset the buffer. Every fold is saved\n"
+        "as a new card *version*, which is what makes the size chart and the fidelity probe\n"
+        "below possible after the fact."
+    ),
     code(
         "# The season is a scale model: ~12k characters, where a real one runs into the\n"
         "# millions. Rather than inflate the transcript - slow, expensive, and no more\n"
@@ -315,6 +326,11 @@ COMPACTION = [
 # Section: the size chart, and why it is not the answer
 # --------------------------------------------------------------------------
 CHART = [
+    md(
+        "**Chart card size vs transcript size.** Pull every saved card version and plot the\n"
+        "two growth curves on a log axis. Then read the caption underneath - the number this\n"
+        "chart reports is necessary but nowhere near sufficient."
+    ),
     code(
         "with conn.cursor() as cur:\n"
         "    cur.execute(\n"
@@ -478,6 +494,12 @@ OFFLOAD = [
         "\n"
         "ok(\"blob store ready\")"
     ),
+    md(
+        "**Pick a target and compute the ground truth.** The busiest asset gives an export\n"
+        "big enough to be worth offloading. Ground truth is a deliberate *lookup* (the oldest\n"
+        "finding's opaque id), not a count - an id can only appear in the answer if the model\n"
+        "actually read the payload, which is exactly what we want to prove."
+    ),
     code(
         "# The busiest asset gives us an export big enough to be worth offloading.\n"
         "with conn.cursor() as cur:\n"
@@ -513,6 +535,12 @@ OFFLOAD = [
         "print(f\"ground truth: oldest finding is {OLDEST['finding_id']} \"\n"
         "      f\"({OLDEST['days_ago']} days ago, {OLDEST['severity']} {OLDEST['category']})\")"
     ),
+    md(
+        "**Define the two tools.** `bulk_inspection_export` returns a `harness://blob/<id>`\n"
+        "reference instead of the payload when the result is too big; `fetch_offloaded`\n"
+        "redeems that reference. `FETCH_LOG` records every id the model asks for, so we can\n"
+        "later prove it fetched rather than guessed."
+    ),
     code(
         "from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage\n"
         "from langchain_core.tools import tool\n"
@@ -547,6 +575,12 @@ OFFLOAD = [
         "\n"
         "OFFLOAD_TOOLS = {t.name: t for t in [bulk_inspection_export, fetch_offloaded]}\n"
         "ok(f\"{len(OFFLOAD_TOOLS)} tools defined - one offloads, one redeems the reference\")"
+    ),
+    md(
+        "**Let the agent run.** Ask a question the stub reference cannot answer, then loop:\n"
+        "the model calls a tool, we feed the result back, repeat until it stops. If it never\n"
+        "fetches the blob, that is a real finding about the prompt - so we let it fail rather\n"
+        "than nudging it."
     ),
     code(
         "OFFLOAD_SYSTEM = (\n"
@@ -584,6 +618,12 @@ OFFLOAD = [
         "if isinstance(answer, list):\n"
         "    answer = \"\".join(p.get(\"text\", \"\") if isinstance(p, dict) else str(p) for p in answer)\n"
         "print(\"\\nANSWER:\", answer.strip()[:400])"
+    ),
+    md(
+        "**Check the loop, not the bytes.** Three assertions: the tool handed back a\n"
+        "reference, the model fetched an id it was actually shown, and its final answer names\n"
+        "the opaque finding_id from the payload. Only the last proves the agent *used* what it\n"
+        "fetched - the check the original section never made."
     ),
     code(
         "# Three assertions, and only the third one is about the agent doing its job.\n"
@@ -655,6 +695,12 @@ EXCLUSION = [
         "    cur.execute(\"SELECT path FROM HARNESS_SCRATCH WHERE status = 'N'\")\n"
         "    candidates = [r[0] for r in cur.fetchall()]\n"
         "print(f\"{len(candidates)} notes awaiting triage\")"
+    ),
+    md(
+        "**Run notebook 02's gate over the mix.** Every blob path plus one genuinely curated\n"
+        "`/inbox` note go through the promotion rule. The two checks assert both directions:\n"
+        "every blob is refused, and the real note still promotes - a specific rule, not a\n"
+        "blanket veto."
     ),
     code(
         "def promotable(path):\n"
@@ -784,6 +830,12 @@ CONSOLIDATION = [
         "\n"
         "ok(\"strength-based compaction defined (ceiling + reinforcement + gist)\")"
     ),
+    md(
+        "**Run the strength-based policy over the same season.** Same fold points as before,\n"
+        "but now each fold reinforces the facts it touched and then evicts the weakest ones\n"
+        "into `gist` until the card is back under its ceiling. Watch the fact/gist counts\n"
+        "trade off as it holds the line."
+    ),
     code(
         "scard = {\"facts\": [], \"decisions\": [], \"open_questions\": [], \"gist\": []}\n"
         "pending, strength_sizes = [], []\n"
@@ -801,6 +853,11 @@ CONSOLIDATION = [
         "\n"
         "check(strength_sizes[-1][1] <= CEILING * 1.1,\n"
         "      f\"strength card held near its {CEILING}-char ceiling ({strength_sizes[-1][1]} chars)\")"
+    ),
+    md(
+        "**Plot the two policies together.** The additive card (from section 3, read back out\n"
+        "of `HARNESS_CARD`) against the strength-based one, with the ceiling drawn in. This is\n"
+        "the compression the size chart in section 3 could not show."
     ),
     code(
         "# Two policies, same season: the additive card (from section 3) vs this one.\n"
@@ -822,6 +879,12 @@ CONSOLIDATION = [
         "print(f\"final: additive {add_final} chars vs strength {str_final} chars\")\n"
         "check(str_final < add_final,\n"
         "      f\"strength-based compaction actually compresses ({str_final} < {add_final})\")"
+    ),
+    md(
+        "**Score fidelity three ways.** For each planted fact, `fact_status` reports whether\n"
+        "it survived **verbatim**, faded to **gist**, or was **lost** - then we probe the card\n"
+        "to see what each survival level can actually answer. This is the honesty the size\n"
+        "chart alone can never give you."
     ),
     code(
         "# The three-way measure the size chart still cannot make: verbatim / gist / lost.\n"
