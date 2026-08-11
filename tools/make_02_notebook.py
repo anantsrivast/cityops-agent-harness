@@ -707,6 +707,111 @@ RECALL = [
 ]
 
 # --------------------------------------------------------------------------
+# Section: follow one note end to end
+# --------------------------------------------------------------------------
+TRACE = [
+    md(
+        "## 7b · Follow one note, end to end\n\n"
+        "Every mechanism above touched a *different* note. Here we take a **single** note and\n"
+        "watch it move through every stage, printing where it lives after each step - scratch\n"
+        "status, the provenance sidecar, and whether it is really in long-term `CITY_MEMORY`.\n"
+        "This is the whole notebook in one narrative: **written → promoted → remembered →\n"
+        "superseded → dropped from recall.**"
+    ),
+    md(
+        "**The lens.** `follow(path)` reads the one note across all three stores and prints a\n"
+        "one-line snapshot. `CITY_MEMORY=yes` is the proof it truly reached long-term memory\n"
+        "(the sidecar's `memory_id` is that table's `record_id`)."
+    ),
+    code(
+        "def follow(path, stage):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"SELECT status FROM HARNESS_SCRATCH WHERE path = :p\", p=path)\n"
+        "        _r = cur.fetchone()\n"
+        "        scratch = _r[0] if _r else \"-\"\n"
+        "        cur.execute(\"\"\"SELECT memory_id, SUBSTR(revision, 1, 8), superseded_by\n"
+        "                       FROM HARNESS_MEMORY_META WHERE source_path = :p\"\"\", p=path)\n"
+        "        meta = cur.fetchone()\n"
+        "    _names = {\"N\": \"new\", \"S\": \"staged\", \"P\": \"promoted\", \"D\": \"discarded\", \"H\": \"hold\"}\n"
+        "    if meta:\n"
+        "        with conn.cursor() as cur:\n"
+        "            cur.execute(\"SELECT COUNT(*) FROM CITY_MEMORY WHERE record_id = :m\", m=meta[0])\n"
+        "            in_ltm = cur.fetchone()[0]\n"
+        "        life = f\"SUPERSEDED by {meta[2][:8]}\" if meta[2] else \"live\"\n"
+        "        durable = (f\"long-term: mem={meta[0][:8]} rev={meta[1]} {life} | \"\n"
+        "                   f\"CITY_MEMORY={'yes' if in_ltm else 'MISSING'}\")\n"
+        "    else:\n"
+        "        durable = \"long-term: (not promoted yet)\"\n"
+        "    print(f\"  {stage:24} | scratch={scratch} ({_names.get(scratch,'?')})  ->  {durable}\")\n"
+        "\n"
+        "TRACE_DEFECT = f\"/inbox/{ASSET_A}/trace-pier7.md\"\n"
+        "TRACE_REPAIR = f\"/inbox/{ASSET_A}/trace-pier7-repair.md\"\n"
+        "# start the story clean (idempotent): forget any earlier run of this trace\n"
+        "for _p in (TRACE_DEFECT, TRACE_REPAIR):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"SELECT memory_id FROM HARNESS_MEMORY_META WHERE source_path = :p\", p=_p)\n"
+        "        for (_mid,) in cur.fetchall():\n"
+        "            try:\n"
+        "                memory.delete_memory(_mid)\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "        cur.execute(\"DELETE FROM HARNESS_MEMORY_META WHERE source_path = :p\", p=_p)\n"
+        "        cur.execute(\"DELETE FROM HARNESS_SCRATCH WHERE path = :p\", p=_p)\n"
+        "conn.commit()\n"
+        "ok(\"follow() lens ready\")"
+    ),
+    md(
+        "**Stage 1 - written.** A field note lands in the inbox at status `N`. Nothing is\n"
+        "durable yet; it is only a *candidate*."
+    ),
+    code(
+        "write_note(TRACE_DEFECT,\n"
+        "           f\"Pier 7 of {ASSET_A}: bearing plate shows active corrosion with measurable\"\n"
+        "           \" section loss. Load rating review recommended; monitor monthly.\")\n"
+        "follow(TRACE_DEFECT, \"1. written\")"
+    ),
+    md(
+        "**Stage 2 - triaged + promoted.** The consumer runs the note through triage (kept -\n"
+        "it is a durable finding), stores it **verbatim** in long-term memory, and writes a\n"
+        "provenance row. Watch `scratch` flip `N -> P` and `CITY_MEMORY` become `yes`."
+    ),
+    code(
+        "promote_note(TRACE_DEFECT)\n"
+        "follow(TRACE_DEFECT, \"2. triaged + promoted\")"
+    ),
+    md(
+        "**Stage 3 - superseded.** Months later the repair is done. Its note is promoted too,\n"
+        "the supersession check recognises it completes the defect, and the sidecar marks the\n"
+        "old memory **superseded** - it stays on record (provenance), but is no longer current."
+    ),
+    code(
+        "write_note(TRACE_REPAIR,\n"
+        "           f\"Pier 7 of {ASSET_A}: bearing plates replaced and recoated; corrosion\"\n"
+        "           \" remediated, section loss addressed. Load rating restored to design.\")\n"
+        "promote_note(TRACE_REPAIR)\n"
+        "follow(TRACE_DEFECT, \"3. after repair promoted\")\n"
+        "follow(TRACE_REPAIR, \"   (the repair itself)\")"
+    ),
+    md(
+        "**Stage 4 - recall prefers the present.** Asking about pier 7 now returns the repair;\n"
+        "the superseded defect is filtered out of retrieval (it remains queryable as history,\n"
+        "just no longer competes for the agent's attention)."
+    ),
+    code(
+        "print(\"  recall('pier 7 bearing corrosion'):\")\n"
+        "_hits = recall(\"pier 7 bearing corrosion\", ASSET_A)\n"
+        "for _h in _hits:\n"
+        "    _tag = (\"  <- the repair (current)\" if _h[\"source_path\"] == TRACE_REPAIR\n"
+        "            else \"  <- the SUPERSEDED defect\" if _h[\"source_path\"] == TRACE_DEFECT else \"\")\n"
+        "    print(f\"    score={_h['score']:.3f}  {_h['source_path']}{_tag}\")\n"
+        "_defect_shown = any(_h[\"source_path\"] == TRACE_DEFECT for _h in _hits)\n"
+        "print(f\"\\n  the superseded defect is \"\n"
+        "      f\"{'STILL shown' if _defect_shown else 'correctly hidden'} in recall\")\n"
+        "ok(\"followed one note: written -> promoted -> remembered -> superseded -> hidden\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
 # Section: continuity of work
 # --------------------------------------------------------------------------
 CONTINUITY = [
@@ -784,7 +889,7 @@ CLOSING = [
 ]
 
 SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, TRIAGE, PROMOTION,
-            PIPELINE, BRIEFING, RECALL, CONTINUITY, CLOSING]
+            PIPELINE, BRIEFING, RECALL, TRACE, CONTINUITY, CLOSING]
 
 
 def build() -> nbf.NotebookNode:
