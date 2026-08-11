@@ -37,7 +37,9 @@ Full walkthrough — secrets, `.env`, the Langfuse UI, and teardown — in
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 **New here?** [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) narrates the *why and how*
-of the whole project and each notebook, with diagrams.
+of the whole project and each notebook, with diagrams. For a deep, line-of-sight
+explanation of notebook 01's machinery, see
+[docs/notebook-01-explained.md](docs/notebook-01-explained.md).
 
 ## Quick start (local)
 

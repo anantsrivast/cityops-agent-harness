@@ -229,6 +229,8 @@ Placement is policy the tool owns; the agent supplies judgement.
 
 ---
 
+> **Going deeper on notebook 01?** [docs/notebook-01-explained.md](notebook-01-explained.md) is a full mechanism-by-mechanism reference — the judge's two layers, gray-band dedup, the skill lifecycle, structured output, and a FAQ.
+
 ## 3 · Notebook 02 — Scheduled briefings (Path 1)
 
 **Why:** the review's Path-1 verdict — *"everything graduates within the hour, 200-
