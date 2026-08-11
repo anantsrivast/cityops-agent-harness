@@ -1095,8 +1095,11 @@ DEMO = [
         "ok(\"follow_workflow lens ready - the PEA line follows one workflow\")"
     ),
     md(
-        "**Occurrence 1 - the unaided baseline.** No skills exist yet, and `use_skills=False`\n"
-        "makes that explicit. Expect a brand-new `HARNESS_WORKFLOW` row and `verified=True`."
+        "**Occurrence 1 - the unaided baseline.**\n"
+        "*What this `run_and_learn` does:* acts with no skill help (`use_skills=False`), the\n"
+        "judge verifies, and CAPTURE finds an empty table so it **inserts a new workflow**.\n"
+        "*Look for:* a brand-new `HARNESS_WORKFLOW` row, and the `PEA` line reading `occ=1\n"
+        "verified=1 promoted=N | 1/3 to gate` - one run is an episode, not yet a pattern."
     ),
     code(
         "print(f\"=== Occurrence 1 ({ASSET_A}) ===\")\n"
@@ -1112,9 +1115,12 @@ DEMO = [
     ),
     code("show_registries(\"after occurrence 1\")\nfollow_workflow(WID, \"after occ 1\")"),
     md(
-        "**Occurrence 2 - the same task, reworded.** Watch the workflow id: it should match\n"
-        "occurrence 1's. A *new* id means the paraphrase landed past the gray band and the\n"
-        "task split silently - the failure mode §6 admits it only narrows."
+        "**Occurrence 2 - the same task, reworded.**\n"
+        "*What this `run_and_learn` does:* same task in different words; CAPTURE embeds it,\n"
+        "finds occurrence 1 as nearest, and `merge_decision` (distance `<0.15`, or the gray\n"
+        "band's LLM saying \"same task\") **merges** instead of inserting.\n"
+        "*Look for:* the `PEA` line's workflow id **unchanged** and `occ=2` - one row, not two.\n"
+        "A second row here would be the silent split §6 admits it only narrows."
     ),
     code(
         "print(f\"=== Occurrence 2 ({ASSET_A}, new phrasing) ===\")\n"
@@ -1130,9 +1136,12 @@ DEMO = [
     ),
     code("show_registries(\"after occurrence 2 - merged, not split\")\nfollow_workflow(WID, \"after occ 2 (merged)\")"),
     md(
-        "**Occurrence 3 - same task type, different asset.** The hard merge. Distance alone\n"
-        "will not settle this one, so it falls into the gray band and the LLM decides whether\n"
-        "\"same procedure, different asset\" counts as the same recurring task."
+        "**Occurrence 3 - same task type, different asset.**\n"
+        "*What this `run_and_learn` does:* the hard merge. A *different asset* pushes the\n"
+        "distance up so it lands in the **gray band** - distance alone can't settle it, so the\n"
+        "LLM is asked whether \"same procedure, different asset\" is the same recurring task.\n"
+        "*Look for:* still **one** row, `PEA` reading `occ=3 verified=3 | HARVEST-READY` - the\n"
+        "third verified occurrence is exactly what clears the gate in the next cell."
     ),
     code(
         "print(f\"=== Occurrence 3 ({ASSET_B}, same task type, different asset) ===\")\n"
@@ -1148,8 +1157,12 @@ DEMO = [
     ),
     code("show_registries(\"after 3 occurrences - the harvest gate is now satisfied\")\nfollow_workflow(WID, \"after occ 3\")"),
     md(
-        "**Harvest.** The gate passes, the stored trajectory is distilled, the faithfulness\n"
-        "check runs, and a skill lands as `provisional` - never approved on creation."
+        "**Harvest.** Not a `run_and_learn` - this is `harvest()`, the promotion step.\n"
+        "*What it does:* the gate (`occ>=3 AND verified>=2 AND verified>failures`) passes, the\n"
+        "stored trajectory is distilled into a `SKILL.md`, a second model call checks the\n"
+        "distilled steps are faithful to the trajectory, and the skill is written `provisional`.\n"
+        "*Look for:* the `PEA` line flip to `promoted=Y` with a skill name appearing - the\n"
+        "workflow becomes a reusable skill, born unproven."
     ),
     code(
         "print(\"=== Harvest ===\")\n"
@@ -1176,9 +1189,12 @@ DEMO = [
         "print(_content.read() if hasattr(_content, 'read') else _content)"
     ),
     md(
-        "**First use of the provisional skill.** `use_skills` defaults to `True`, so the\n"
-        "manifest is injected - labelled as unproven, to be verified against fresh data. A\n"
-        "verified outcome here counts toward promotion."
+        "**First use of the provisional skill.**\n"
+        "*What this `run_and_learn` does:* `use_skills=True` (the default), so STEP 2 now finds\n"
+        "the harvested skill within distance and injects it (labelled *unproven*). The run's\n"
+        "verdict flows back to that skill via `update_skill_outcomes` (STEP 6).\n"
+        "*Look for:* the `PEA` skill line gaining `uses=1`; the `check` confirms the skill was\n"
+        "actually retrieved (`skill_ids` non-empty). Status stays `provisional` - one isn't two."
     ),
     code(
         "print(f\"=== Using the provisional skill (run 1) ===\")\n"
@@ -1196,12 +1212,14 @@ DEMO = [
     ),
     code("show_registries(\"after skill use 1 - counters moving, still provisional\")\nfollow_workflow(WID, \"after skill use 1\")"),
     md(
-        "**Second use - promotion fires once two uses verify.** Two *verified* uses with zero\n"
-        "failures flip the skill `provisional → approved`. Authority is earned by linked\n"
-        "outcomes, not granted at creation - the loop the promotion review said never closes.\n"
-        "Because verification is stochastic, this may take a use or two more to land; the `PEA`\n"
-        "line shows the true status, and a skill *staying* provisional is the gate holding, not\n"
-        "a bug."
+        "**Second use - promotion fires once two uses verify.**\n"
+        "*What this `run_and_learn` does:* uses the skill again and feeds back another verdict.\n"
+        "When the skill reaches **two verified uses, zero failures**, `lifecycle_transition`\n"
+        "flips it `provisional → approved` - authority earned by linked outcomes, not granted\n"
+        "at creation (the loop the review said never closes).\n"
+        "*Look for:* the `PEA` skill line - `[approved]` if both uses verified, still\n"
+        "`[provisional]` if one didn't (verification is stochastic; a skill *staying*\n"
+        "provisional is the gate holding, not a bug)."
     ),
     code(
         "print(f\"=== Using the skill again (run 2) - promotion happens here if both verified ===\")\n"
@@ -1387,7 +1405,135 @@ PRODUCER = [
     ),
 ]
 
-SECTIONS = [INTRO, SETUP, BOOTSTRAP, REGISTRY_DDL, TOOLBOX_SEC, AGENT_LOOP, JUDGE, CAPTURE, SKILLS_SEC, DEMO, PRODUCER, CLOSING]
+# --------------------------------------------------------------------------
+# Section: anatomy of one run_and_learn (slow motion)
+# --------------------------------------------------------------------------
+ANATOMY = [
+    md(
+        "## 7c · Anatomy of one `run_and_learn`, in slow motion\n\n"
+        "The arc below calls `run_and_learn` as a black box. Before that, here is **one** call\n"
+        "opened up - the same six moving parts, run by hand on a throwaway task, printing what\n"
+        "each step decides and **which table each write lands in**. Run the cells in order and\n"
+        "watch the database change under you.\n\n"
+        "> The `run_and_learn` black box = STEP 3 (act) + STEP 4 (judge) + STEP 5 (capture) +\n"
+        "> STEP 6 (learn). STEPs 1-2 happen *inside* STEP 3, but we surface them so the tool /\n"
+        "> skill retrieval is visible too. Every function called here is the real one.\n\n"
+        "For the model's own reasoning at STEPs 3-4, open the matching Langfuse trace; this\n"
+        "teardown is the half Langfuse cannot show you - the SQL writes."
+    ),
+    code(
+        "def _count(sql):\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(sql)\n"
+        "        return cur.fetchone()[0]\n"
+        "\n"
+        "ANATOMY_TASK = (f\"Inspect {ASSET_A}: a cracked weld at the girder-to-bearing seam near\"\n"
+        "                f\" pier 4. Check history and record a finding with a recommendation.\")\n"
+        "print(\"one task, opened up:\\n \", ANATOMY_TASK)"
+    ),
+    md(
+        "**STEP 1 · Retrieve tools by meaning.** `retrieve_tools` embeds the task and ranks\n"
+        "`HARNESS_TOOLS` by cosine distance, dropping anything past `TOOL_DISTANCE_MAX`.\n"
+        "*Look for:* only relevant tools bound, each with its distance - no top-k padding."
+    ),
+    code(
+        "_tools = retrieve_tools(ANATOMY_TASK)\n"
+        "for _t in _tools:\n"
+        "    print(f\"    {_t['name']:26} distance={_t['distance']:.3f}\")\n"
+        "print(f\"  -> {len(_tools)} tool(s) bound; cutoff = {TOOL_DISTANCE_MAX} (nothing beyond it)\")"
+    ),
+    md(
+        "**STEP 2 · Retrieve skills.** `build_skill_manifest` does the same distance-gated\n"
+        "lookup over `HARNESS_SKILLS`, approved-before-provisional.\n"
+        "*Look for:* `none` here - no skill has been harvested yet, so there is nothing to\n"
+        "inject. This is the step that will light up *after* the arc harvests one."
+    ),
+    code(
+        "_manifest, _sids = build_skill_manifest(ANATOMY_TASK)\n"
+        "print(f\"  skills injected: {_sids or 'none (none harvested yet, or none within distance)'}\")"
+    ),
+    md(
+        "**STEP 3 · ACT - the agent loop.** `run_copilot_task` binds the retrieved tools and\n"
+        "iterates model -> tool calls -> results, recording every step as a trajectory.\n"
+        "*Look for:* the ordered trajectory, and `CITY_INSPECTION_FINDING` gaining a row when\n"
+        "the agent calls `tool_log_finding` - the real domain write."
+    ),
+    code(
+        "_before = _count(\"SELECT COUNT(*) FROM CITY_INSPECTION_FINDING\")\n"
+        "_run = run_copilot_task(ANATOMY_TASK)\n"
+        "for _i, _s in enumerate(_run[\"trajectory\"], 1):\n"
+        "    print(f\"    {_i}. {_s['tool']}({_s['args']}) -> {str(_s['result'])[:55]}\")\n"
+        "_after = _count(\"SELECT COUNT(*) FROM CITY_INSPECTION_FINDING\")\n"
+        "print(f\"  -> CITY_INSPECTION_FINDING: {_before} -> {_after} rows \"\n"
+        "      f\"({_after - _before} finding written by the agent)\")"
+    ),
+    md(
+        "**STEP 4 · JUDGE - audit against the database, not the prose.** `build_evidence`\n"
+        "re-queries every finding the run claims or cites; the judge sees task + trajectory +\n"
+        "answer + that evidence.\n"
+        "*Look for:* each write marked `EXISTS`/`NOT FOUND`, then `verified=True/False`. This\n"
+        "is the gate that later decides whether the run counts as a success."
+    ),
+    code(
+        "print(\"  evidence (re-queried from the DB):\")\n"
+        "for _line in build_evidence(_run[\"trajectory\"], _run[\"answer\"]).splitlines():\n"
+        "    print(\"    \" + _line)\n"
+        "_verdict = judge_workflow(ANATOMY_TASK, _run)\n"
+        "print(f\"  -> verified={_verdict.verified}: {_verdict.reason[:110]}\")"
+    ),
+    md(
+        "**STEP 5 · CAPTURE - dedup by meaning, then write the workflow.** The intent is\n"
+        "embedded, `_nearest_workflow` finds the closest existing one, and `merge_decision`\n"
+        "picks merge / ask-the-LLM / new. Here the table is empty, so it is a clean **insert**.\n"
+        "*Look for:* `HARNESS_WORKFLOW` gaining a row, and its counters set by the verdict\n"
+        "(`verified_successes` vs `failures`)."
+    ),
+    code(
+        "_ivec = array.array('f', embedder.embed([ANATOMY_TASK])[0].tolist())\n"
+        "_near = _nearest_workflow(_ivec)\n"
+        "print(\"  nearest existing workflow: \"\n"
+        "      + ('none (table empty) -> decision will be NEW' if _near is None\n"
+        "         else f\"{_near['workflow_id'][:8]} at distance {_near['distance']:.3f}\"))\n"
+        "_wf_before = _count(\"SELECT COUNT(*) FROM HARNESS_WORKFLOW\")\n"
+        "_awid = capture_workflow(ANATOMY_TASK, _run, _verdict.verified)\n"
+        "_wf_after = _count(\"SELECT COUNT(*) FROM HARNESS_WORKFLOW\")\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"\"\"SELECT occurrences, verified_successes, failures, promoted\n"
+        "                   FROM HARNESS_WORKFLOW WHERE workflow_id = :w\"\"\", w=_awid)\n"
+        "    _o, _vs, _fa, _pr = cur.fetchone()\n"
+        "print(f\"  -> HARNESS_WORKFLOW: {_wf_before} -> {_wf_after} rows | this workflow \"\n"
+        "      f\"{_awid[:8]}: occ={_o} verified={_vs} fail={_fa} promoted={_pr}\")"
+    ),
+    md(
+        "**STEP 6 · LEARN - feed the verdict back to any skills used.** `update_skill_outcomes`\n"
+        "bumps the `uses`/`verified` counters on each skill the run consumed, then\n"
+        "`lifecycle_transition` may flip its status.\n"
+        "*Look for:* nothing to update *yet* - no skill was injected in STEP 2. This step is\n"
+        "the one that turns a provisional skill into an approved one, once skills exist."
+    ),
+    code(
+        "if _sids:\n"
+        "    update_skill_outcomes(_sids, _verdict.verified)\n"
+        "    print(f\"  updated skill outcomes for: {_sids}\")\n"
+        "else:\n"
+        "    print(\"  no skill was used (none exist yet) -> nothing to update.\")\n"
+        "    print(\"  this is the step that promotes provisional -> approved once the arc harvests one.\")\n"
+        "\n"
+        "# This was a rehearsal: forget its workflow row so the arc below starts from empty.\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"DELETE FROM HARNESS_WORKFLOW WHERE workflow_id = :w\", w=_awid)\n"
+        "conn.commit()\n"
+        "ok(\"anatomy done - that is one run_and_learn; the rehearsal row is cleaned up\")"
+    ),
+    md(
+        "**So `run_and_learn` = act → judge → capture → learn**, touching three tables:\n"
+        "`CITY_INSPECTION_FINDING` (the domain write), `HARNESS_WORKFLOW` (the captured\n"
+        "procedure), and `HARNESS_SKILLS` (outcomes, once a skill exists). The arc below now\n"
+        "runs this same call five times - watch the counters you just saw move accumulate."
+    ),
+]
+
+SECTIONS = [INTRO, SETUP, BOOTSTRAP, REGISTRY_DDL, TOOLBOX_SEC, AGENT_LOOP, JUDGE, CAPTURE, SKILLS_SEC, ANATOMY, DEMO, PRODUCER, CLOSING]
 
 
 def build() -> nbf.NotebookNode:
