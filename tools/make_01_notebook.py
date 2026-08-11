@@ -345,7 +345,17 @@ REGISTRY_DDL = [
         "        with conn.cursor() as cur:\n"
         "            cur.execute(ddl)\n"
         "        conn.commit()\n"
-        "ok(\"HARNESS_TOOLS / HARNESS_WORKFLOW / HARNESS_SKILLS ready\")"
+        "\n"
+        "# Start each run from a clean LEARNED state. The tables persist across runs, but\n"
+        "# their ROWS are this run's learning - leaving them makes a second run inherit stale\n"
+        "# workflows/skills (harvest can't re-fire; the anatomy's STEP 2 shows a leftover\n"
+        "# skill instead of 'none'). Clearing the rows makes the notebook re-runnable. Only the\n"
+        "# learned HARNESS_% tables are touched - never the CITY_% domain data.\n"
+        "with conn.cursor() as cur:\n"
+        "    for _t in (\"HARNESS_WORKFLOW\", \"HARNESS_SKILLS\"):\n"
+        "        cur.execute(f\"DELETE FROM {_t}\")\n"
+        "conn.commit()\n"
+        "ok(\"HARNESS_TOOLS / HARNESS_WORKFLOW / HARNESS_SKILLS ready - learned state reset\")"
     ),
     md(
         "**Fingerprint the domain schema.** Hashes every `CITY_*` column name and type into\n"
