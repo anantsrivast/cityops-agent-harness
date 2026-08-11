@@ -289,6 +289,70 @@ directories.** It judges only "is this worth keeping?"; the *tool* files
 `/work` (scratch). Placement is policy the tool owns; the agent supplies
 judgement.
 
+### 3.8 · A real captured workflow row (worked example)
+
+Abstract descriptions only go so far — here is an actual `HARNESS_WORKFLOW` row
+the harness captured during a run, so you can see what `intent`, `steps`, and the
+counters really contain.
+
+**The row (counters + intent):**
+
+```
+workflow_id = bb1f9896-4b1   occurrences=4  verified_successes=4  failures=0  promoted=Y
+intent      = "Inspect Harbor Bridge: heavy corrosion on the bearing plates at pier 2.
+               Assess severity against past findings and record a finding with your recommendation."
+```
+
+**`steps` — the trajectory, a list of `{tool, args, result}` dicts in order:**
+
+```python
+[
+  { "tool": "tool_find_similar_findings",                 # STEP 1 — search history FIRST
+    "args": { "description": "surface corrosion staining under deck drainage outlets...",
+              "asset_id": "Riverside Pedestrian Bridge", "k": 5 },
+    "result": '[{"finding_id": "6bbddab7-3a1", "severity": "medium", ...}, ...]'   # priors (truncated to 300 chars)
+  },
+  { "tool": "tool_log_finding",                           # STEP 2 — record the new finding
+    "args": { "asset_id": "Riverside Pedestrian Bridge", "category": "corrosion",
+              "severity": "medium",
+              "description": "Corrosion staining... Consistent with prior findings
+                              6bbddab7-3a1, f53c2c66-14f, 2c931c49-d17...",
+              "recommendation": "..." },
+    "result": "78b69385-124"                              # ← the finding_id it created
+  }
+]
+```
+
+**The same trajectory as the judge reads it** (`improve.trajectory_to_text`):
+
+```
+Step 1: tool_find_similar_findings
+  args: {"description": "surface corrosion staining...", "asset_id": "Riverside Pedestrian Bridge", "k": 5}
+  result: [{"finding_id": "6bbddab7-3a1", "severity": "medium", ...}] ...[truncated]
+Step 2: tool_log_finding
+  args: {"asset_id": "Riverside Pedestrian Bridge", "category": "corrosion", "severity": "medium", "description": "..."}
+  result: 78b69385-124
+```
+
+**How the judge uses exactly this:**
+
+- **`build_evidence` (SQL):** finds the `tool_log_finding` step, takes its result
+  `78b69385-124`, and re-queries `CITY_INSPECTION_FINDING` → `EXISTS`. It also
+  checks the prior ids the description cites (`6bbddab7-3a1`, …).
+- **Criterion (a):** Step 1 (search) precedes Step 2 (log), and a finding *was*
+  recorded → procedure followed. (A trajectory with only Step 1 fails here.)
+- **Citations:** the `finding_id`s in the description/answer are the "citations"
+  the judge re-verifies.
+
+**What this row proves about `intent` vs `steps`:** the `intent` says **Harbor
+Bridge**, but the trajectory is a **Riverside Pedestrian Bridge** run. That's the
+mechanism working as designed — `intent` is *frozen at occurrence 1's wording*
+(used only for identity/dedup), while `steps` is *overwritten with the latest
+verified trajectory* (used for distillation). When this workflow harvested
+(`promoted=Y`), the `SKILL.md` was distilled from **this Riverside trajectory** —
+the grounded record of tools + args + results — not from the Harbor-Bridge intent
+text.
+
 ---
 
 ## 4 · Reliability details
