@@ -1492,6 +1492,40 @@ ANATOMY = [
         "print(f\"  -> verified={_verdict.verified}: {_verdict.reason[:110]}\")"
     ),
     md(
+        "**STEP 4b · The judge, up close.** The summary above hides two things worth seeing:\n"
+        "*exactly what the judge reads*, and its *full* reasoning. The prompt below is the\n"
+        "real audit input - task + trajectory + answer + the DB evidence, re-queried live."
+    ),
+    code(
+        "print(\"===== the exact prompt the judge sees =====\\n\")\n"
+        "print(JUDGE_PROMPT.format(\n"
+        "    task=ANATOMY_TASK,\n"
+        "    trajectory=improve.trajectory_to_text(_run['trajectory']),\n"
+        "    answer=_run['answer'],\n"
+        "    evidence=build_evidence(_run['trajectory'], _run['answer'])))\n"
+        "print(\"\\n===== the judge's FULL reasoning =====\\n\" + _verdict.reason)"
+    ),
+    md(
+        "**Does the DB audit actually bite?** Take the *same* run and fabricate one detail - an\n"
+        "extra citation to a finding that does not exist - then re-judge. Only that one variable\n"
+        "changes. `build_evidence` re-queries the fake id, finds it missing, and the judge flips\n"
+        "to `verified=False`. This is the whole difference from `success = bool(final)`: a\n"
+        "confident answer that cites a nonexistent record is **caught**, not trusted."
+    ),
+    code(
+        "# same trajectory + answer, with ONE fabricated finding_id spliced into the answer\n"
+        "_faked = {\"trajectory\": _run[\"trajectory\"], \"skill_ids\": _run[\"skill_ids\"],\n"
+        "          \"answer\": _run[\"answer\"] + \" Corroborated by prior finding deadbeef-000.\"}\n"
+        "print(\"evidence now carries the fabricated citation:\")\n"
+        "for _l in build_evidence(_faked['trajectory'], _faked['answer']).splitlines():\n"
+        "    print(\"   \" + _l)\n"
+        "_fake_verdict = judge_workflow(ANATOMY_TASK, _faked)\n"
+        "print(f\"\\n  honest run   -> verified={_verdict.verified}\")\n"
+        "print(f\"  tampered run -> verified={_fake_verdict.verified}: {_fake_verdict.reason[:150]}\")\n"
+        "check(not _fake_verdict.verified,\n"
+        "      \"the judge rejects a fabricated citation - the DB audit has teeth\")"
+    ),
+    md(
         "**STEP 5 · CAPTURE - dedup by meaning, then write the workflow.** The intent is\n"
         "embedded, `_nearest_workflow` finds the closest existing one, and `merge_decision`\n"
         "picks merge / ask-the-LLM / new. Here the table is empty, so it is a clean **insert**.\n"
@@ -1513,6 +1547,38 @@ ANATOMY = [
         "    _o, _vs, _fa, _pr = cur.fetchone()\n"
         "print(f\"  -> HARNESS_WORKFLOW: {_wf_before} -> {_wf_after} rows | this workflow \"\n"
         "      f\"{_awid[:8]}: occ={_o} verified={_vs} fail={_fa} promoted={_pr}\")"
+    ),
+    md(
+        "**STEP 5b · Dedup, up close - the three bands.** That was a clean insert (empty\n"
+        "table). The interesting part is what CAPTURE does when a neighbour already exists. With\n"
+        "the workflow we just captured as the only neighbour, here is how three new intents get\n"
+        "classified by cosine distance - `merge_decision`'s three bands, with the real numbers.\n"
+        "This is the mechanism that makes `occurrences` climb instead of splitting into\n"
+        "near-duplicates. Read-only - nothing is written."
+    ),
+    code(
+        "_v = embedder.embed([ANATOMY_TASK])[0]\n"
+        "print(f\"intent_embedding: dim={len(_v)}, first 5 = {[round(float(x), 3) for x in _v[:5]]}\\n\")\n"
+        "\n"
+        "_probes = [\n"
+        "    (\"near-paraphrase\",\n"
+        "     f\"Check {ASSET_A} for a cracked weld at the girder-bearing seam by pier 4 and log it.\"),\n"
+        "    (\"same task, different asset\",\n"
+        "     \"Inspect Elm Overpass: a cracked weld at the girder-to-bearing seam near pier 4; log it.\"),\n"
+        "    (\"off-topic\", \"Plan the office holiday party and book a caterer.\"),\n"
+        "]\n"
+        "for _label, _probe in _probes:\n"
+        "    _pv = array.array('f', embedder.embed([_probe])[0].tolist())\n"
+        "    _near = _nearest_workflow(_pv)\n"
+        "    _dist = _near[\"distance\"] if _near else 1.0\n"
+        "    _decision = improve.merge_decision(_dist)\n"
+        "    if _decision == \"ask\":\n"
+        "        _same = _same_task_model.invoke(\n"
+        "            f\"Task A: {ANATOMY_TASK}\\nTask B: {_probe}\\n\"\n"
+        "            \"Same recurring task? same=true/false.\").same\n"
+        "        _decision = f\"ask (gray band) -> LLM same={_same} -> {'merge' if _same else 'new'}\"\n"
+        "    print(f\"  {_label:28} distance={_dist:.3f}  ->  {_decision}\")\n"
+        "print(\"\\n  bands:  merge < 0.15   |   ask 0.15-0.40   |   new > 0.40\")"
     ),
     md(
         "**STEP 6 · LEARN - feed the verdict back to any skills used.** `update_skill_outcomes`\n"
