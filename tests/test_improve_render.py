@@ -16,7 +16,6 @@ def _render():
         when_to_use="An inspector reports corrosion and needs it assessed and recorded.",
         steps_body="1. Search history.\n2. Grade severity.\n3. Record the finding.",
         source_workflow_id="wf-123",
-        schema_sha="abc123",
     )
 
 
@@ -25,7 +24,6 @@ def test_render_roundtrips_through_parse():
     assert parsed["name"] == "corrosion-triage"
     assert parsed["tools"] == ["find_similar_findings", "log_finding"]
     assert parsed["source_workflow"] == "wf-123"
-    assert parsed["schema_sha"] == "abc123"
     assert "Search history" in parsed["steps_body"]
     assert "inspector reports corrosion" in parsed["when_to_use"]
 
@@ -66,6 +64,6 @@ def test_parse_tolerates_dashes_inside_values():
     text = render_skill_md(
         name="s", description="triage --- with dashes", tools=["t"],
         when_to_use="when", steps_body="1. do",
-        source_workflow_id="w", schema_sha="x",
+        source_workflow_id="w",
     )
     assert parse_skill_md(text)["description"] == "triage --- with dashes"

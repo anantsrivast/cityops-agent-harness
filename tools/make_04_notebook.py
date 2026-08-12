@@ -266,7 +266,7 @@ EVAL_SKILL = [
         "def _skill_from(traj, name, when, steps):\n"
         "    return improve.render_skill_md(name=name, description=when, tools=[s[\"tool\"] for s in traj],\n"
         "                                   when_to_use=when, steps_body=steps,\n"
-        "                                   source_workflow_id=\"wf-\" + name, schema_sha=\"deadbeef\")\n"
+        "                                   source_workflow_id=\"wf-\" + name)\n"
         "\n"
         "\n"
         "FAITHFUL_STEPS = \"1. Search similar findings first.\\n2. Log the new finding citing severity.\"\n"

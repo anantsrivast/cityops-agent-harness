@@ -6,7 +6,6 @@ database or an LLM. The notebook supplies the SQL and model calls.
 
 from __future__ import annotations
 
-import hashlib
 import json
 
 _SKILL_TEMPLATE = """---
@@ -14,7 +13,6 @@ name: {name}
 description: {description}
 tools: {tools}
 source_workflow: {source_workflow_id}
-schema_sha: {schema_sha}
 ---
 
 ## When to use
@@ -33,14 +31,12 @@ def render_skill_md(
     when_to_use: str,
     steps_body: str,
     source_workflow_id: str,
-    schema_sha: str,
 ) -> str:
     return _SKILL_TEMPLATE.format(
         name=name,
         description=description,
         tools=", ".join(tools),
         source_workflow_id=source_workflow_id,
-        schema_sha=schema_sha,
         when_to_use=when_to_use.strip(),
         steps_body=steps_body.strip(),
     )
@@ -59,7 +55,7 @@ def parse_skill_md(text: str) -> dict:
     for line in front.strip().splitlines():
         key, _, value = line.partition(":")
         meta[key.strip()] = value.strip()
-    for required in ("name", "description", "tools", "source_workflow", "schema_sha"):
+    for required in ("name", "description", "tools", "source_workflow"):
         if required not in meta:
             raise ValueError(f"skill frontmatter missing {required!r}")
     meta["tools"] = [t.strip() for t in meta["tools"].split(",") if t.strip()]
@@ -136,8 +132,3 @@ def filter_by_distance(
     rows: list[dict], max_distance: float, key: str = "distance"
 ) -> list[dict]:
     return [r for r in rows if r[key] <= max_distance]
-
-
-def compute_schema_sha(columns: list[tuple]) -> str:
-    canon = "\n".join(sorted(f"{t}.{c}:{d}" for t, c, d in columns))
-    return hashlib.sha256(canon.encode()).hexdigest()

@@ -1,5 +1,4 @@
 from cityops_harness.improve import (
-    compute_schema_sha,
     filter_by_distance,
     harvest_ready,
     lifecycle_transition,
@@ -46,13 +45,4 @@ def test_filter_by_distance():
     assert filter_by_distance(rows, 0.1) == []
 
 
-def test_compute_schema_sha_order_independent():
-    a = compute_schema_sha([("T1", "C1", "VARCHAR2"), ("T2", "C2", "NUMBER")])
-    b = compute_schema_sha([("T2", "C2", "NUMBER"), ("T1", "C1", "VARCHAR2")])
-    assert a == b and len(a) == 64
 
-
-def test_compute_schema_sha_changes_with_schema():
-    a = compute_schema_sha([("T1", "C1", "VARCHAR2")])
-    b = compute_schema_sha([("T1", "C1", "CLOB")])
-    assert a != b
