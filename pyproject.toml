@@ -16,7 +16,7 @@ dependencies = [
     "langchain-anthropic>=0.3",
     "langchain-openai>=0.3",
     "langchain-oracledb>=1.0",
-    "oracleagentmemory",
+    "oracleagentmemory>=26.6,<27",
     "pydantic>=2",
     "pandas",
     "matplotlib",
