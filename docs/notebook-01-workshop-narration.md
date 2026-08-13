@@ -296,6 +296,38 @@ against fresh data."** The run records which `skill_ids` it used, closing the lo
 > with a verified procedure in context. And because we track `skill_ids`, every use keeps
 > feeding the lifecycle. The system gets better at the jobs it does often."
 
+### 9a · How retrieval actually works (and why a skill sometimes misses)
+
+Retrieval happens in **two phases**, and only one of them ever steers the agent:
+
+- **Phase 1 — apply (before acting).** The task is vector-searched against **skills**; matches
+  are injected into the prompt. **Skills are the "apply" layer.**
+- **Phase 2 — account (after acting).** The task is vector-searched against **workflows**, but
+  *only* to decide merge-vs-new and bump `occurrences`. Workflows are never injected or
+  executed. **Workflows are the "accounting" layer** — they count until a task type earns a skill.
+
+So when both match (a task type that's already been harvested), the **skill** steers the run and
+the **workflow** just gets its counter bumped. They don't compete.
+
+**What a "task" is:** there is no separate intent object — the "task" is the **raw
+natural-language string** you pass to `run_and_learn(...)`, embedded *whole*, in-database, no
+rewriting. The same raw string is what Phase 2 stores as the workflow's `intent`.
+
+**The asymmetry that matters:** a skill is embedded from just its **`"name: description"`** — not
+its full `SKILL.md`. So Phase-1 matching is:
+
+```
+embed(raw task string)   vs   embed("skill_name: skill_description")   →   keep if cosine ≤ 0.65
+```
+
+> **Say this — the answer to "why didn't the skill fire?":** because we're matching *raw task
+> text* against a *short skill summary* with a hard `0.65` floor, **phrasing matters**. A task
+> that means the same thing but is worded far from the skill's name/description can land past
+> the threshold and **miss** — the skill won't be injected even though it's relevant. (That's
+> exactly what happened when `r4`'s "pitting on expansion-joint anchor bolts" wording drifted
+> too far from the corrosion skill; rewording it closer fixed it.) In production you'd soften
+> this with better skill descriptions, query expansion, or a higher-recall first pass.
+
 ---
 
 ## 10 · Putting it together — `run_and_learn`
@@ -335,6 +367,10 @@ These are the things that can bite you in the room. Know them.
 - **The editor can hold a stale copy.** If you regenerate or pull a new notebook while it's
   open, VS Code may keep the old in-memory version. **Revert/reopen the file** so the editor
   matches disk before you run.
+- **"The skill didn't fire" is usually a phrasing miss, not a bug.** Skill retrieval matches raw
+  task text against the skill's short `name: description` with a hard `0.65` cosine floor (see
+  §9a). If a relevant skill isn't injected, the task was likely worded too far from that summary
+  — reword closer, or check the distance. It is *not* evidence the skill was lost or retired.
 
 ---
 
