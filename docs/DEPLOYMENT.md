@@ -94,11 +94,28 @@ secrets — you don't paste them into `.env`. Confirm everything is wired up by
 running **`notebooks/00_setup.ipynb`** top to bottom; every section ends in a
 green check.
 
-> **Non-ADMIN DB users:** `00_setup.ipynb` loads the ONNX embedding model via
-> `DBMS_VECTOR.LOAD_ONNX_MODEL_CLOUD`. Once, as ADMIN, run
-> `GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;`. Notebook 02's scheduled
-> pipeline also needs `GRANT CREATE PROCEDURE TO <your_user>;` and
-> `GRANT CREATE JOB TO <your_user>;`.
+> **Non-ADMIN DB users:** run all four as ADMIN before you start:
+>
+> ```sql
+> GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;   -- nb00: LOAD_ONNX_MODEL_CLOUD
+> GRANT CREATE PROCEDURE TO <your_user>;        -- nb02: scheduled pipeline
+> GRANT CREATE JOB TO <your_user>;              -- nb02: scheduled pipeline
+> GRANT CREATE TRIGGER TO <your_user>;          -- nb02: Agent Memory v13 schema
+> ```
+>
+> `CREATE TRIGGER` arrived with Oracle Agent Memory 26.8: its managed schema
+> (v13) adds a `<PREFIX>MEMORY_LINK` table and a delete trigger that revalidates
+> memories when an invalidating relation goes away. The v12 → v13 upgrade is
+> **not atomic** — it retypes `MESSAGE.CONTENT` (`CLOB` → `JSON`) and only then
+> creates the trigger, so running without the privilege against a store built by
+> an older SDK leaves it stamped v12 carrying a v13 column, which neither SDK
+> version can read. Notebook 02 §0 verifies the privileges and refuses to
+> continue before any schema DDL runs, so the failure mode is a red check with a
+> `GRANT` to copy rather than a half-migrated store. If you hit it anyway,
+> recreate the store: `DROP TABLE CITY_MEMORY/CITY_MESSAGE/CITY_THREAD/`
+> `CITY_RECORD_CHUNKS/CITY_ACTOR_PROFILE/CITY_ORACLEAGENTMEMORY_SCHEMA_META`
+> and re-run notebook 02 (the notes themselves live in `HARNESS_SCRATCH`, so
+> promotion replays).
 
 Notebooks **00–03 run with `LANGFUSE_MODE=off`**. Only **notebook 04 (evals)
 requires Langfuse** — set `LANGFUSE_MODE=local` and bring up the stack below.

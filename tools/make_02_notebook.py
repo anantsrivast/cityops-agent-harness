@@ -63,15 +63,26 @@ SETUP = [
         "ok(f\"connected - provider={settings.llm_provider}, langfuse={settings.langfuse_mode}\")"
     ),
     code(
-        "# The scheduled pipeline needs two privileges most ADB users lack by default.\n"
+        "# Three privileges most ADB users lack by default. CREATE PROCEDURE and CREATE JOB\n"
+        "# are for the scheduled pipeline (Section 5). CREATE TRIGGER is for the memory\n"
+        "# store itself: Agent Memory 26.8 raised its managed schema to v13, which adds a\n"
+        "# <PREFIX>MEMORY_LINK table plus a delete trigger that revalidates memories when\n"
+        "# an invalidating link is removed (Section 7c).\n"
+        "#\n"
+        "# This gate runs BEFORE the store is opened, and on purpose. The v12 -> v13\n"
+        "# upgrade is not atomic: it retypes MESSAGE.CONTENT from CLOB to JSON and only\n"
+        "# then creates the trigger. Without the grant it fails there, leaving the store\n"
+        "# stamped v12 but carrying a v13 column - unreadable by old and new SDK alike.\n"
+        "# Better to stop here with a grant to run than to half-migrate a live store.\n"
+        "REQUIRED_PRIVS = {\"CREATE PROCEDURE\", \"CREATE JOB\", \"CREATE TRIGGER\"}\n"
         "with conn.cursor() as cur:\n"
         "    cur.execute(\"SELECT privilege FROM user_sys_privs\")\n"
         "    _privs = {r[0] for r in cur.fetchall()}\n"
-        "_missing = {\"CREATE PROCEDURE\", \"CREATE JOB\"} - _privs\n"
+        "_missing = REQUIRED_PRIVS - _privs\n"
         "check(not _missing,\n"
-        "      f\"scheduler privileges present (run as ADMIN if missing: \"\n"
-        "      + \"; \".join(f'GRANT {p} TO {settings.db_user}' for p in sorted(_missing)) + \")\"\n"
-        "      if _missing else \"scheduler privileges present (CREATE PROCEDURE, CREATE JOB)\")"
+        "      \"missing privilege(s) - run as ADMIN, then re-run this cell: \"\n"
+        "      + \"; \".join(f'GRANT {p} TO {settings.db_user}' for p in sorted(_missing))\n"
+        "      if _missing else f\"privileges present ({\", \".join(sorted(REQUIRED_PRIVS))})\")"
     ),
     code(
         "import asyncio\n"
@@ -104,6 +115,10 @@ SETUP = [
 SDK_INIT = [
     md(
         "## 1 · The Agent Memory SDK - configured for *whole-note* promotion\n\n"
+        "`schema_policy=CREATE_IF_NECESSARY` creates the managed schema (v13 as of Agent\n"
+        "Memory 26.8) or applies a supported upgrade to an existing one. `table_name_prefix`\n"
+        "keeps every managed table under `CITY_`, which is why the promotion checks later in\n"
+        "this notebook can read `CITY_MEMORY` directly.\n\n"
         "`extract_memories=False` is a deliberate review fix, not a shortcut: the original\n"
         "pipeline chunked files into 200-word windows and had the LLM *re-interpret* each one\n"
         "at ingest - confident misreadings of mid-sentence fragments became durable facts.\n"
@@ -812,6 +827,141 @@ TRACE = [
 ]
 
 # --------------------------------------------------------------------------
+# Section: the same supersession, as a first-class relation (26.8 graph memory)
+# --------------------------------------------------------------------------
+RELATIONS = [
+    md(
+        "## 7c \u00b7 The same supersession, as a first-class relation\n\n"
+        "Section 7 built supersession by hand, because the SDK had no notion of it: an\n"
+        "`HARNESS_MEMORY_META.superseded_by` column, and a `recall()` that joins the sidecar\n"
+        "and drops the rows it points at. Agent Memory **26.8** models relations natively, so\n"
+        "this section does the same job through the platform and shows what that buys.\n\n"
+        "| | hand-rolled (\u00a77) | native relation (here) |\n"
+        "|---|---|---|\n"
+        "| where it lives | your sidecar column | the managed `CITY_MEMORY_LINK` table |\n"
+        "| who decides | your LLM supersession check | **still your LLM check** |\n"
+        "| effect on the old memory | nothing; `recall()` filters it out | `status` flips to `invalid` |\n"
+        "| asking *what did we used to believe?* | impossible - filtering only hides | `num_hops=1` returns it as a link |\n"
+        "| undo | `UPDATE \u2026 SET superseded_by = NULL` | `delete_record_link` revalidates |\n\n"
+        "Read the second row carefully, because it is the honest limit: **the SDK records a\n"
+        "relation, it does not judge one.** Deciding that a repair note completes a defect is\n"
+        "still the model call from Section 4. Graph memory replaces the bookkeeping, not the\n"
+        "judgement."
+    ),
+    code(
+        "# Two memories that genuinely stand in this relation: the defect note and the repair\n"
+        "# note that completes it. Both were promoted earlier, so look up their memory_ids\n"
+        "# from the sidecar rather than writing anything new.\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"\"\"SELECT memory_id FROM HARNESS_MEMORY_META\n"
+        "                    WHERE source_path = :p ORDER BY promoted_at DESC\n"
+        "                    FETCH FIRST 1 ROWS ONLY\"\"\", p=SUPERSEDE_DEFECT_PATH)\n"
+        "    _row = cur.fetchone()\n"
+        "    DEFECT_MID = _row and _row[0]\n"
+        "    cur.execute(\"\"\"SELECT memory_id FROM HARNESS_MEMORY_META\n"
+        "                    WHERE source_path = :p ORDER BY promoted_at DESC\n"
+        "                    FETCH FIRST 1 ROWS ONLY\"\"\", p=SUPERSEDE_REPAIR_PATH)\n"
+        "    _row = cur.fetchone()\n"
+        "    REPAIR_MID = _row and _row[0]\n"
+        "check(bool(DEFECT_MID and REPAIR_MID),\n"
+        "      f\"found both memories to relate (defect={str(DEFECT_MID)[:12]}, \"\n"
+        "      f\"repair={str(REPAIR_MID)[:12]})\")"
+    ),
+    code(
+        "# \u270f\ufe0f TODO(6): record the relation. The repair memory SUPERSEDES the defect one -\n"
+        "#             direction matters, source is the memory that wins. Both endpoints are\n"
+        "#             memory-like records, so pass record_type 'fact' for each, and carry the\n"
+        "#             provenance path in metadata so the link explains itself later.\n"
+        "#             Built-in types: supersedes / contradicts / refines / supports /\n"
+        "#             duplicates. Return value is the relation_id.\n"
+        "# TODO-SOLUTION-START\n"
+        "RELATION_ID = memory.link_records(\n"
+        "    source_record_id=REPAIR_MID, source_record_type=\"fact\",\n"
+        "    target_record_id=DEFECT_MID, target_record_type=\"fact\",\n"
+        "    relation_type=\"supersedes\",\n"
+        "    metadata={\"source_path\": SUPERSEDE_REPAIR_PATH},\n"
+        ")\n"
+        "# TODO-SOLUTION-END\n"
+        "print(f\"relation {str(RELATION_ID)[:12]}: repair --supersedes--> defect\")\n"
+        "\n"
+        "\n"
+        "def status_of(memory_id, query=\"bearing plate\"):\n"
+        "    \"\"\"Lifecycle status straight off the search result - no sidecar, no raw SQL.\n"
+        "    include_invalid_results=True is what makes an invalidated memory visible at\n"
+        "    all; .status is 'valid' or 'invalid'.\"\"\"\n"
+        "    for hit in memory.search(query, user_id=ASSET_A, agent_id=\"CITY\",\n"
+        "                             max_results=20, include_invalid_results=True):\n"
+        "        if hit.id == memory_id:\n"
+        "            s = hit.status\n"
+        "            return getattr(s, \"value\", s)\n"
+        "    return None\n"
+        "\n"
+        "\n"
+        "check(status_of(DEFECT_MID) == \"invalid\",\n"
+        "      \"the superseded memory's lifecycle changed in the store \"\n"
+        "      f\"(status={status_of(DEFECT_MID)!r}) - no sidecar column required\")"
+    ),
+    md(
+        "**The payoff is not the hiding - it is the asking.** `recall()` in Section 7 can only\n"
+        "*suppress* a superseded memory. A relation is traversable, so the same store answers\n"
+        "both questions: *what is true now?* and *what did we believe before, and what changed\n"
+        "it?* The first is `include_invalid_results=False`; the second is `num_hops=1`."
+    ),
+    code(
+        "# What is true now: invalid records stay out. This is the default, and it needs\n"
+        "# no join against HARNESS_MEMORY_META at all.\n"
+        "_now = memory.search(\"bearing plate corrosion at pier 2\", user_id=ASSET_A,\n"
+        "                     agent_id=\"CITY\", max_results=5,\n"
+        "                     include_invalid_results=False)\n"
+        "print(\"current belief:\")\n"
+        "for h in _now:\n"
+        "    print(f\"   {h.id[:12]} {h.content[:80]}...\")\n"
+        "check(all(h.id != DEFECT_MID for h in _now),\n"
+        "      \"the superseded defect does not compete for retrieval attention\")\n"
+        "\n"
+        "# What changed it: traverse one hop and the history comes back. linked_results is\n"
+        "# the shortest-path tree out of each hit, so the superseded memory is reachable\n"
+        "# *through the relation* rather than by querying a column we maintain ourselves.\n"
+        "_history = memory.search(\"bearing plate corrosion at pier 2\", user_id=ASSET_A,\n"
+        "                         agent_id=\"CITY\", max_results=5, num_hops=1,\n"
+        "                         max_linked_results=5, include_invalid_results=True)\n"
+        "_reachable = set()\n"
+        "for h in _history:\n"
+        "    _reachable.add(h.id)\n"
+        "    for linked in (h.linked_results or []):\n"
+        "        _reachable.add(linked.id)\n"
+        "        _s = getattr(linked.status, \"value\", linked.status)\n"
+        "        print(f\"   {h.id[:12]} --(1 hop)--> {linked.id[:12]} [{_s}]\")\n"
+        "check(DEFECT_MID in _reachable,\n"
+        "      \"one hop reaches the superseded memory - the sidecar could only hide it\")"
+    ),
+    md(
+        "**Undo is a delete, and the store repairs itself.** The managed schema carries a\n"
+        "delete trigger on the link table: remove an invalidating relation and the memory it\n"
+        "pointed at goes back to `valid`, with the invalidation reason cleared. That is the\n"
+        "trigger `CREATE TRIGGER` buys you, and the reason Section 0 refuses to open the store\n"
+        "without that grant."
+    ),
+    code(
+        "memory.delete_record_link(relation_id=RELATION_ID)\n"
+        "_restored = status_of(DEFECT_MID)\n"
+        "check(_restored == \"valid\",\n"
+        "      f\"deleting the relation revalidated the memory (status={_restored!r}) - \"\n"
+        "      \"the trigger did that, not our code\")\n"
+        "\n"
+        "# Put it back: the rest of the notebook (and notebook 03) should see the world as\n"
+        "# Section 7 left it, with the repair superseding the defect.\n"
+        "RELATION_ID = memory.link_records(\n"
+        "    source_record_id=REPAIR_MID, source_record_type=\"fact\",\n"
+        "    target_record_id=DEFECT_MID, target_record_type=\"fact\",\n"
+        "    relation_type=\"supersedes\",\n"
+        "    metadata={\"source_path\": SUPERSEDE_REPAIR_PATH},\n"
+        ")\n"
+        "ok(\"relation restored - supersession is recorded in the store, not beside it\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
 # Section: continuity of work
 # --------------------------------------------------------------------------
 CONTINUITY = [
@@ -889,7 +1039,7 @@ CLOSING = [
 ]
 
 SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, TRIAGE, PROMOTION,
-            PIPELINE, BRIEFING, RECALL, TRACE, CONTINUITY, CLOSING]
+            PIPELINE, BRIEFING, RECALL, TRACE, RELATIONS, CONTINUITY, CLOSING]
 
 
 def build() -> nbf.NotebookNode:

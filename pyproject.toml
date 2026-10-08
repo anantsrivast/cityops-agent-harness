@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "oracledb>=2.0",
     "python-dotenv>=1.0",
-    "litellm>=1.40",
+    "litellm>=1.95.1",   # floor required by oracleagentmemory 26.8
     "langfuse>=3.0",
     # langfuse.langchain.CallbackHandler imports the `langchain` meta-package to
     # branch on its __version__, so langchain-core alone is not enough.
@@ -16,7 +16,13 @@ dependencies = [
     "langchain-anthropic>=0.3",
     "langchain-openai>=0.3",
     "langchain-oracledb>=1.0",
-    "oracleagentmemory>=26.6,<27",
+    # 26.8 is the floor for graph memory: link_records / update_record_link /
+    # delete_record_link, plus link traversal at search time (num_hops,
+    # max_linked_results) and include_invalid_results. It raises the managed
+    # schema to v13, which adds a <PREFIX>MEMORY_LINK table AND a trigger - so
+    # the DB user now needs CREATE TRIGGER (see README). Still capped below 27,
+    # where table_name_prefix is removed; notebook 02 reads CITY_MEMORY directly.
+    "oracleagentmemory>=26.8,<27",
     "pydantic>=2",
     "pandas",
     "matplotlib",

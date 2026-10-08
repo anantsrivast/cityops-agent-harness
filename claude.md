@@ -24,7 +24,8 @@ Strength-based card consolidation — once the only deferred item — was built
 
 Live-verification currency, which drifts as notebooks change: nb03 re-verified
 2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 2026-08-13,
-nb02 2026-08-11, nb00 2026-07-25. That nb03 pass is the first since the
+nb02 2026-08-11 **on 26.6 — its 26.8 §7c graph-relation section has never run
+live, pending the CREATE TRIGGER grant**, nb00 2026-07-25. That nb03 pass is the first since the
 2026-08-10 `merge_card` strength fix and confirms §4b live: the facts list grows
 to 10 then *shrinks* to 6 as gist absorbs 4 evicted facts, holding ~4.2k against
 the 4000-char ceiling while the additive card runs to 14.7k, with no planted fact
@@ -69,6 +70,14 @@ All work is on `main`; the `foundation` branch is history.
   (`TOOL_DISTANCE_MAX=0.92`) was replaced 2026-08-11 by progressive disclosure —
   a hot core plus capability groups behind an `open_capability` meta-tool. A
   distance floor failed silently; an explicit request is a visible step.
+- `oracleagentmemory>=26.8,<27` (2026-10-08). 26.8 is the floor for graph
+  memory - `link_records` / `update_record_link` / `delete_record_link`, link
+  traversal at search time (`num_hops`, `max_linked_results`) and
+  `include_invalid_results`; notebook 02 §7c teaches it against the
+  hand-rolled sidecar supersession in §7, which is kept on purpose as the
+  contrast. Still capped below 27, where `table_name_prefix` is removed and
+  nb02 reads `CITY_MEMORY` by that prefix. Floor also forces
+  `litellm>=1.95.1` and (transitively) `cryptography>=50`.
 - Naming: professional/descriptive names, not whimsical.
 
 ## Environment
@@ -92,9 +101,28 @@ All work is on `main`; the `foundation` branch is history.
   on purpose as the "never compresses" setup; §4b adds a ceiling + reinforcement
   + gist eviction that holds ~4k while additive runs to ~16k, scored three-way
   (verbatim/gist/lost). Design write-up remains in the spec.
+- **Blocked on ADMIN (2026-10-08): `GRANT CREATE TRIGGER TO ANANT;`** —
+  oracleagentmemory 26.8's managed schema (v13) adds a `<PREFIX>MEMORY_LINK`
+  table plus `<PREFIX>MEMORY_LINK_DELETE_TRG`, which revalidates a memory when
+  an invalidating relation is deleted. ANANT has CREATE TABLE/VIEW/SEQUENCE/
+  PROCEDURE/JOB/MATERIALIZED VIEW/MINING MODEL/PROPERTY GRAPH but **not**
+  CREATE TRIGGER, so every 26.8 store open fails `ORA-01031` — fresh creates
+  and upgrades alike, and `REQUIRE_EXISTING` too (it demands v13). Until the
+  grant lands, **notebook 02 cannot run at all on 26.8** and §7c is unverified
+  live. Verified by sandbox (prefix `SBX*`, created and dropped; `CITY_` never
+  touched).
+- **The v12 → v13 upgrade is NOT atomic.** Proven on a sandbox store: it
+  retypes `MESSAGE.CONTENT` CLOB → JSON and *then* creates the trigger, so a
+  run without the privilege leaves the store stamped `schema_version=12` while
+  carrying a v13 column — 26.8 can't finish it and 26.6 fails `ORA-01790` on
+  the type mismatch. Notebook 02 §0 therefore checks CREATE PROCEDURE, CREATE
+  JOB and CREATE TRIGGER and raises *before* the store is opened; `check()`
+  raises, so the notebook stops at a red check with a GRANT to copy rather
+  than half-migrating a live store. Never "just try it" against `CITY_`.
+  CITY_ is at v12, `CITY_MESSAGE.CONTENT` still CLOB.
 - **Blocked on ADMIN:** `GRANT CREATE PROCEDURE TO ANANT;` and
   `GRANT CREATE JOB TO ANANT;` — phase 02 task 7 cannot run without them.
-  Notebook 03 deliberately needs neither.
+  (Both are in place on this ADB.) Notebook 03 deliberately needs neither.
 - The ADB caps concurrent sessions at **30** (Developer tier). `get_connection`
   pools at 2 per process; exhaustion surfaces as `ORA-12506`/`DPY-6000`, which
   reads like the database is down even though the console shows it Available.

@@ -316,6 +316,30 @@ Recall runs the SDK relevance search, joins the sidecar to **drop superseded
 memories and attach provenance**, then recency-weights what remains
 (`rerank_by_recency`, a half-life decay) so the present outranks the stale past.
 
+### 3.3b · The same supersession, as a first-class relation (§7c)
+
+All of §3.3 is hand-rolled because the SDK had no notion of a relation. Oracle
+Agent Memory **26.8** added one, so §7c does the same job through the platform:
+
+```mermaid
+flowchart LR
+  lk["link_records(repair, defect,<br/>'supersedes')"] --> st["defect.status -> invalid<br/>(managed CITY_MEMORY_LINK)"]
+  st --> q1["search(include_invalid_results=False)<br/>-> current belief only"]
+  st --> q2["search(num_hops=1)<br/>-> history, through the link"]
+  st --> un["delete_record_link<br/>-> trigger revalidates"]
+```
+
+Two things are worth taking from the contrast. The **sidecar can only hide** a
+superseded memory; a relation is traversable, so one store answers both *what is
+true now?* and *what did we believe before, and what changed it?* And the SDK
+**records** a relation, it does not **judge** one — deciding that a repair
+completes a defect is still the §3.3 model call. Graph memory replaces the
+bookkeeping, not the judgement.
+
+This is also where the `CREATE TRIGGER` prerequisite comes from: the managed v13
+schema carries a delete trigger on the link table that returns an invalidated
+memory to `valid` when its invalidating relation goes away.
+
 ### 3.4 · Actually scheduled, with a pulse
 
 The review's sharpest point: the producer was scheduled but the consumer only ran

@@ -13,7 +13,7 @@ actually works.
 |---|---|
 | `notebooks/00_setup.ipynb` | Verify ADB, in-DB embeddings, LLM provider, Langfuse |
 | `notebooks/01_self_improving_copilot_complete.ipynb` (+ `_todo`) | Tool registry, verified workflow capture, skill harvesting with lifecycle |
-| `notebooks/02_scheduled_briefings_complete.ipynb` (+ `_todo`) | Curated whole-note promotion, provenance + supersession, DBMS_SCHEDULER pipeline, morning briefing |
+| `notebooks/02_scheduled_briefings_complete.ipynb` (+ `_todo`) | Curated whole-note promotion, provenance + supersession, DBMS_SCHEDULER pipeline, morning briefing, the same supersession as a first-class graph relation |
 | `notebooks/03_context_engineering_complete.ipynb` (+ `_todo`) | Compaction with a card-fidelity probe, agent-in-the-loop offloading, blobs barred from promotion |
 | `notebooks/04_evals_complete.ipynb` (+ `_todo`) | Five Langfuse evals: promotion precision, skill fidelity, skills-help, card fidelity over horizon, cost per correct |
 
@@ -50,11 +50,27 @@ cp .env.example .env        # fill in DB_PASSWORD, WALLET_PASSWORD, keys
 .venv/bin/jupyter lab notebooks/00_setup.ipynb
 ```
 
-> **Non-ADMIN database users:** `00_setup.ipynb` loads the ONNX embedding
-> model via `DBMS_VECTOR.LOAD_ONNX_MODEL_CLOUD`, which needs object-storage
-> access. If you connect as a regular user, first run (once, as ADMIN):
-> `GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;` — otherwise the load fails
-> with `ORA-00904: "DBMS_CLOUD"."GET_OBJECT": invalid identifier`.
+> **Non-ADMIN database users:** run these once as ADMIN, or notebooks 00 and 02
+> fail:
+>
+> ```sql
+> GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;   -- nb00: loads the ONNX model
+> GRANT CREATE PROCEDURE TO <your_user>;        -- nb02: scheduled pipeline
+> GRANT CREATE JOB TO <your_user>;              -- nb02: scheduled pipeline
+> GRANT CREATE TRIGGER TO <your_user>;          -- nb02: Agent Memory v13 schema
+> ```
+>
+> Without `DBMS_CLOUD`, the model load fails with
+> `ORA-00904: "DBMS_CLOUD"."GET_OBJECT": invalid identifier`.
+>
+> `CREATE TRIGGER` is new with Oracle Agent Memory 26.8, whose managed schema
+> (v13) adds a `<PREFIX>MEMORY_LINK` table plus a delete trigger that
+> revalidates memories when an invalidating relation is removed. **Grant it
+> before opening a store that was created by an older SDK:** the v12 → v13
+> upgrade retypes `MESSAGE.CONTENT` from `CLOB` to `JSON` *before* creating the
+> trigger, so a run without the privilege leaves the store stamped v12 with a
+> v13 column — readable by neither SDK version. Notebook 02 checks all three
+> privileges in §0 and stops there, before any schema DDL, if one is missing.
 
 ## LLM providers
 
