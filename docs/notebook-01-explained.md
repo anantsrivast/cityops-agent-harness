@@ -77,8 +77,8 @@ flowchart TD
   T["run_and_learn(task)"] --> A["_act_and_judge(task)"]
   A --> ACT["run_copilot_task — THE AGENT ACTS"]
   ACT --> ST1["build_skill_manifest → retrieve skills (thresholded)"]
-  ACT --> ST2["retrieve_tools → embed + distance + threshold"]
-  ACT --> LOOP["agent loop: model → tool calls → trajectory"]
+  ACT --> ST2["bound_tools → HOT core + open_capability"]
+  ACT --> LOOP["agent loop: model → tool calls → trajectory<br/>open_capability re-binds the toolset mid-run"]
   LOOP --> WRITE["tool_log_finding → WRITES CITY_INSPECTION_FINDING"]
   A --> J["judge_workflow — THE JUDGE"]
   J --> EV["build_evidence → re-queries the DB (plain SQL)"]
@@ -102,25 +102,50 @@ write lands in. If you want to *watch* the process, that's the section.
 
 ## 3 · The mechanisms, one at a time
 
-### 3.1 · Tools: registered by meaning, retrieved with a floor
+### 3.1 · Tools: a hot core, with the rest disclosed on demand
 
-Each tool's `name: description` is embedded (in-database ONNX, 384-dim) into
-`HARNESS_TOOLS`. At task time, `retrieve_tools` embeds the task, ranks tools by
-cosine distance, and **drops anything past `TOOL_DISTANCE_MAX = 0.92`**:
+Only two tools are always bound — the search → log core that covers the common
+inspection task:
 
 ```python
-rows = improve.filter_by_distance(rows, TOOL_DISTANCE_MAX)   # the threshold is the point
+HOT = ["tool_find_similar_findings", "tool_log_finding"]
 ```
 
-The threshold, not the top-k, is the design: an off-topic task binds **no** tools
-rather than the least-bad four. (Known wrinkle: 0.92 sits close to the range of
-*relevant* tool distances, so a task whose wording drifts can occasionally drop a
-tool it needed — see §8.)
+The cold tail is bucketed by capability, each group carrying a *when to reach for
+it* line. Those lines become the `CAPABILITY_RUBRIC` that goes into the agent's
+system prompt, and a meta-tool unlocks a group:
+
+```python
+GROUPS = {"inspection": {"when": "look up an asset's class, list its recent "
+                                 "findings, or read the full detail of a finding", ...},
+          "recording":  {"when": "amend an EXISTING finding - change its severity "
+                                 "or set its recommendation", ...}}
+
+def bound_tools():                       # recomputed every turn of the loop
+    names = list(HOT) + [n for g in opened for n in GROUPS[g]["tools"]]
+    return [TOOLBOX[n] for n in names] + [open_capability]
+```
+
+`open_capability("inspection")` adds that group to `opened`, and because
+`bound_tools()` is re-evaluated on each iteration, its tools are callable on the
+**next** step. `HARNESS_TOOLS` records every tool under its group (`hot` for the
+core) — a plain catalogue, **no embeddings**.
+
+**Why this and not similarity search?** An earlier version embedded each tool's
+`name: description` and cut by cosine distance at `TOOL_DISTANCE_MAX = 0.92`. Two
+problems: at seven tools, vector retrieval solves a problem this harness does not
+have; and a distance floor fails *silently* — a task whose wording drifted lost a
+tool it needed, with nothing in the trajectory to say so. Disclosure inverts that.
+The agent asks for the capability **by name**, so the request is a visible step in
+the trajectory, a wrong guess costs one turn and self-corrects, and the rubric is
+written as conditionals rather than bare labels so the mapping need → group is not
+a guess. The cost is honest and bounded: reaching a cold tool takes an extra turn.
 
 ### 3.2 · The agent loop and full-trajectory capture
 
-`run_copilot_task` binds the retrieved tools and iterates **model → tool calls →
-results → model** until the model stops calling tools. Every step is recorded:
+`run_copilot_task` binds the hot core plus whatever has been disclosed so far and
+iterates **model → tool calls → results → model** until the model stops calling
+tools, re-binding the toolset each turn. Every step is recorded:
 
 ```python
 trajectory.append({"tool": tc["name"], "args": tc["args"],
@@ -142,39 +167,47 @@ fix is to **audit the database, not the prose** — and it has two layers.
 
 ```mermaid
 flowchart LR
-  traj["trajectory"] --> EV["build_evidence — PLAIN SQL, no LLM<br/>re-query each claimed write + each cited id"]
-  ans["final answer"] --> EV
-  EV -->|"EXISTS / NOT FOUND"| J["LLM judge (4 criteria)"]
-  traj --> J
+  ans["final answer"] --> EV["build_evidence — PLAIN SQL, no LLM<br/>re-query every finding_id the answer cites"]
+  EV -->|"EXISTS / NOT FOUND"| J["LLM judge (3 criteria)"]
+  traj["trajectory"] --> J
+  ans --> J
   J --> V["Verdict(verified: bool, reason: str)"]
 ```
 
 **Layer 1 — `build_evidence` (deterministic).** An ordinary Python function that
-runs SQL directly:
+regexes the `finding_id`s out of the final answer and runs SQL directly:
 
 ```python
 cur.execute("SELECT ... FROM CITY_INSPECTION_FINDING WHERE finding_id = :f", f=fid)
 ```
 
-It re-queries every finding the trajectory *claims* to have written and every
-`finding_id` *cited* in the answer, tagging each `EXISTS` / `NOT FOUND`. **This is
-not a tool.** It is hardcoded SQL that runs *before* the model sees anything — so
-the ground truth is non-negotiable and the LLM can't skip it, misuse it, or be
-talked out of it.
+One loop, over the ids the answer **cites** — the one it just recorded plus any
+priors it names — tagging each `EXISTS` / `NOT FOUND`. **This is not a tool.** It
+is hardcoded SQL that runs *before* the model sees anything, so the ground truth
+is non-negotiable and the LLM can't skip it, misuse it, or be talked out of it.
+
+Note what it deliberately does *not* do: it no longer re-queries the writes the
+trajectory *claims*. Looking up an id that `tool_log_finding` just returned is
+near-tautological — the row exists because the tool inserted it. The real
+anti-hallucination work is catching a **fabricated citation**, which is what the
+single pass over cited ids does. Read §5 as a pattern rather than a finding_id
+trick: verify your agent's checkable side effect against ground truth — a ticket
+that exists, a test that passes, an HTTP 200.
 
 **Layer 2 — the LLM judge.** Reads task + trajectory + answer + that evidence and
-decides `verified` against **four** criteria:
+decides `verified` against **three** criteria:
 
 | | criterion | answered by |
 |---|---|---|
 | (a) | did it follow the procedure? (search *before* recording; record when asked) | LLM over the **trajectory** |
-| (b) | is every claimed DB write confirmed? | the **SQL evidence** |
-| (c) | does every cited `finding_id` EXIST? | the **SQL evidence** |
-| (d) | does the answer avoid contradicting the trajectory / inventing records? | LLM over the **answer** |
+| (b) | does every cited `finding_id` appear as EXISTS? | the **SQL evidence** |
+| (c) | does the answer avoid contradicting the trajectory / inventing records? | LLM over the **answer** |
 
-So the finding-id lookup answers **(b) and (c)**; **(a) and (d)** are judgments a
+So the finding-id lookup answers **(b)**; **(a)** and **(c)** are judgments a
 query can't make (did it skip the record step? does the prose oversell?). The SQL
-is the *trustworthy floor*; the LLM reasons on top of it.
+is the *trustworthy floor*; the LLM reasons on top of it. Interpretive judgement —
+severity reasoning, recommendations, comparisons phrased as the copilot's own
+assessment — is explicitly allowed and does not fail the audit.
 
 **Citations** are `finding_id`s the copilot puts in *its own* final answer — its
 system prompt tells it to "cite its finding_id." Two kinds: the id it just created
@@ -243,9 +276,13 @@ For each qualifying workflow, `promote_workflow_to_skill`:
 2. runs a **faithfulness check** — a second model call comparing the distilled
    steps back against the trajectory. If it says unfaithful, the skill is
    **rejected and nothing is written**;
-3. renders a `SKILL.md` (YAML frontmatter + `## When to use` + `## Steps`), stamps
-   it with the **schema fingerprint** (`schema_sha`), and inserts it as
-   **`status = 'provisional'`**.
+3. renders a `SKILL.md` (YAML frontmatter + `## When to use` + `## Steps`) and
+   inserts it as **`status = 'provisional'`**.
+
+The trajectory is filtered before distillation: `open_capability` steps are
+dropped, because asking for a toolset is harness plumbing, not a domain step —
+left in, they made the faithfulness judge reject otherwise-good skills for
+describing steps the write-up sensibly omitted.
 
 A skill is **born unproven**. It never gets authority at creation.
 
@@ -273,11 +310,22 @@ it, with no failures. (Promotion to *approved* is genuinely stochastic: it needs
 two verified *uses*, and verification can fail, so a skill legitimately *staying*
 provisional is the gate holding, not a bug.)
 
-**Staleness.** Each skill records the `schema_sha` it was distilled against;
-retrieval re-checks it against the current schema and labels a mismatch `[STALE]`.
-(Honest limitation: today this only *labels* — it does not retire the skill or
-remove it from retrieval; and `compute_schema_sha` hashes only column
-name+type, ignoring length/nullability. See §8.)
+**Staleness — deliberately absent.** An earlier version stamped each skill with a
+`schema_sha` (a hash of the `CITY_*` columns) and prefixed a mismatch with
+`[STALE]`. It was cut, not refactored, because it fingerprinted the wrong layer:
+skills contain no SQL — they are procedures over the *tools*, and the tool
+wrappers are exactly the indirection that absorbs schema change. So it fired on
+changes that could not break a skill and stayed silent on tool-signature drift,
+which breaks every skill naming that tool. It also never fired (nothing in the
+notebook alters a table) and was never enforced or measured.
+
+The replacement belongs at the tool contract — a per-skill `tools_sha` over the
+call signatures the skill's frontmatter names, distinguishing BROKEN (tool gone)
+from STALE (a required argument changed) from OK (a docstring reword). That is
+designed but **not built**, and the honest first move is an eval that measures
+whether a stale skill actually does harm, before adding machinery to label it.
+Today a skill's only freshness signal is its own track record: two failures
+retire it.
 
 ### 3.7 · The producer (§8b): the copilot writes memory
 
@@ -336,13 +384,14 @@ Step 2: tool_log_finding
 
 **How the judge uses exactly this:**
 
-- **`build_evidence` (SQL):** finds the `tool_log_finding` step, takes its result
-  `78b69385-124`, and re-queries `CITY_INSPECTION_FINDING` → `EXISTS`. It also
-  checks the prior ids the description cites (`6bbddab7-3a1`, …).
+- **`build_evidence` (SQL):** scans the final answer for `finding_id`s — the new
+  `78b69385-124` and any priors it cites, e.g. `6bbddab7-3a1` — and re-queries
+  `CITY_INSPECTION_FINDING` for each → `EXISTS` / `NOT FOUND`. It reads the
+  *answer*, not the trajectory.
 - **Criterion (a):** Step 1 (search) precedes Step 2 (log), and a finding *was*
   recorded → procedure followed. (A trajectory with only Step 1 fails here.)
-- **Citations:** the `finding_id`s in the description/answer are the "citations"
-  the judge re-verifies.
+- **Criterion (b):** an id the copilot cites but never created comes back
+  `NOT FOUND`, and the run fails — which is the whole point.
 
 **What this row proves about `intent` vs `steps`:** the `intent` says **Harbor
 Bridge**, but the trajectory is a **Riverside Pedestrian Bridge** run. That's the
@@ -377,8 +426,8 @@ showed a leftover skill instead of "none."
 | Notebook § | Function(s) | Mechanism |
 |---|---|---|
 | 0–1 Setup / Bootstrap | `get_connection`, `OracleONNXEmbedder`, `classify_asset` | env, embedder, domain seed |
-| 2 Registry DDL | `_table_exists`, learned-state reset, `current_schema_sha` | the three tables + fingerprint |
-| 3 Toolbox | `tool_*`, `register_tool`, `retrieve_tools` | tools by meaning + threshold (3.1) |
+| 2 Registry DDL | `_table_exists`, learned-state reset | the three tables, reset for re-runs |
+| 3 Toolbox | `tool_*`, `register_tool`, `HOT`/`GROUPS`, `open_capability` | hot core + disclosure on demand (3.1) |
 | 4 Agent loop | `run_copilot_task` | act + trajectory capture (3.2) |
 | 5 Judge | `build_evidence`, `Verdict`, `judge_workflow`, `record_score` | verified success (3.3) |
 | 6 Capture | `merge_decision`, `_nearest_workflow`, `capture_workflow`, `run_and_learn` | gray-band dedup + the loop (3.4, 2) |
@@ -403,8 +452,8 @@ exist; the search is to *ground* the assessment, not a gate on recording.
 
 **Q: All the judge does is a DB query for `finding_id`?**
 No. The DB query (`build_evidence`) is the deterministic *floor* — it answers
-criteria (b) and (c). But the LLM judge also reasons about (a) "did it follow the
-procedure" and (d) "does the prose oversell", which no query can. Take away the
+criterion (b). But the LLM judge also reasons about (a) "did it follow the
+procedure" and (c) "does the prose oversell", which no query can. Take away the
 query and the judge is vibes; take away the LLM and you can't tell if the
 procedure was followed.
 
@@ -439,9 +488,10 @@ undercut the notebook's own "audit, don't assume" ethos:
 
 | Area | Limitation |
 |---|---|
-| `TOOL_DISTANCE_MAX = 0.92` | overlaps the range of *relevant* tool distances, so a drifted task phrasing can silently drop a needed tool |
+| Progressive disclosure | reaching a cold tool costs a turn, and a wrong group guess costs another; `max_iters = 6` is the budget both spend from |
 | Gray-band dedup | a paraphrase past the `> 0.40` boundary still splits silently — the band narrows the failure, doesn't remove it |
-| Skill staleness | `[STALE]` is a *label* only (still retrieved, still full authority); `schema_sha` ignores column length/nullability |
+| Skill staleness | there is none: a skill distilled against a changed tool contract is retrieved at full authority until two failures retire it (see 3.6) |
+| Skill retrieval | the task is embedded raw and matched against the skill's `name: description` summary, so a relevant skill can miss the `0.65` floor on phrasing alone |
 | Skill promotion | reaching `approved` needs two verified *uses* and verification is stochastic — a skill may stay provisional across a run |
 | Approved-before-provisional | only reorders *within* the top-k fetched by distance; an approved skill ranked below the cutoff is never seen |
 

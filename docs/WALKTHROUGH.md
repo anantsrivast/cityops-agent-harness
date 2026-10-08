@@ -122,12 +122,20 @@ flowchart LR
   cap --> harv["harvest<br/>(recurs + verified → SKILL.md)"]
 ```
 
-### 2.1 · Tools registered by meaning, retrieved with a floor
+### 2.1 · Tools: a hot core, the rest disclosed on demand
 
-Each tool's `name: description` is embedded into `HARNESS_TOOLS`. `retrieve_tools`
-ranks by cosine distance and **cuts everything past a threshold** — so an
-off-topic task binds *no* tools rather than the least-bad four. The threshold is
-the point, not the top-k.
+Two tools are always bound — the search → log core that covers the common task.
+The rest sit in **capability groups**, each with a *when to reach for it* line
+that goes into the agent's instructions as a routing rubric. A meta-tool,
+`open_capability(group)`, unlocks one; the toolset is re-bound every turn, so the
+group's tools are callable on the next step. `HARNESS_TOOLS` is a catalogue by
+group — no embeddings.
+
+The point is **legibility**. An earlier version embedded tool descriptions and cut
+by cosine distance, which failed silently: a differently-worded task lost a tool
+it needed and nothing said so. Here the agent asks for the capability by name, the
+request is a visible step in the trajectory, and a wrong guess costs one turn and
+self-corrects.
 
 ### 2.2 · The agent loop captures the *full* trajectory
 
@@ -137,9 +145,10 @@ sequenceDiagram
   participant Agent as Agent (LLM)
   participant Tools
   participant DB as Oracle DB
-  Task->>Agent: task + retrieved tools
+  Task->>Agent: task + hot tools + capability rubric
   loop until no tool calls (max_iters)
     Agent->>Tools: tool call (args)
+    Note right of Agent: open_capability → toolset re-bound next turn
     Tools->>DB: read / write
     DB-->>Tools: result
     Tools-->>Agent: full result
@@ -160,20 +169,27 @@ pass. Instead:
 
 ```mermaid
 flowchart LR
-  traj["trajectory"] --> ev["build_evidence:<br/>re-query every claimed write<br/>+ every cited finding_id"]
-  ans["final answer"] --> ev
+  ans["final answer"] --> ev["build_evidence:<br/>re-query every cited finding_id"]
   ev -->|"EXISTS / NOT FOUND"| J["LLM judge"]
-  traj --> J
+  traj["trajectory"] --> J
+  ans --> J
   J --> V{"verified?"}
   V -->|yes| S["verified_successes++"]
   V -->|no| F["failures++"]
 ```
 
-`build_evidence` goes back to `CITY_INSPECTION_FINDING` and re-queries every finding
-the run *claims* to have written and every `finding_id` it *cites*, tagging each
-`EXISTS` or `NOT FOUND`. The judge sees task + trajectory + answer + that evidence
-and returns a structured `verified: bool`. Only a verified run feeds the success
-count, and the verdict is logged to Langfuse as a score.
+`build_evidence` scans the final answer for `finding_id`s — the one it just recorded
+plus any priors it cites — and re-queries `CITY_INSPECTION_FINDING` for each, tagging
+it `EXISTS` or `NOT FOUND`. It audits **citations**, not the trajectory's claimed
+writes: looking up an id the logging tool just returned only confirms that the insert
+inserted, while a fabricated citation is the failure that matters. The judge sees task
++ trajectory + answer + that evidence and returns a structured `verified: bool`. Only
+a verified run feeds the success count, and the verdict is logged to Langfuse as a
+score.
+
+Read the section as a pattern rather than a `finding_id` trick: verify your agent's
+checkable side effect against ground truth — a ticket that exists, a test that
+passes, an HTTP 200.
 
 ### 2.4 · Capture: dedup by meaning, with an honest gray band
 
@@ -214,9 +230,11 @@ stateDiagram-v2
 ```
 
 An approved skill is injected as "prefer this approach"; a provisional one as an
-unproven candidate — same retrieval, different prompt authority. Each skill records
-the **schema fingerprint** it was distilled against, so a skill built on an old
-schema can be flagged stale at retrieval.
+unproven candidate — same retrieval, different prompt authority. Track record is the
+*only* authority signal: there is deliberately no freshness check. An earlier
+schema fingerprint was cut for fingerprinting the wrong layer (skills contain no
+SQL — they are procedures over tools), and the `tools_sha` that should replace it
+is designed but unbuilt. See §7.
 
 ### 2.6 · Closing the loop: the copilot as a producer (§8b)
 
@@ -470,14 +488,14 @@ exist would violate principle #5.
 | Area | Gap | Status |
 |---|---|---|
 | nb03 / `context.py` | `merge_card` wiped strength bookkeeping on re-list | **fixed** |
-| nb01 | not re-runnable — `promoted='Y'` never reset, 2nd run fails at harvest | identified |
+| nb01 | not re-runnable — `promoted='Y'` never reset, 2nd run fails at harvest | **fixed** — learned state resets at the registry DDL cell |
+| nb04 | eval 5 crashed (`round(None)`) on the card-lost-a-fact case it exists to catch | **fixed** — reported `n/a (0 correct)`, drawn as no bar |
+| nb04 | eval 3 passed vacuously on `0 ≥ 0` — didn't enforce "skills help" | **fixed** — both arms must be fully scored and one must succeed |
 | nb02 | recency recall inert — sidecar never stores `days_ago` | identified |
 | nb03 | `fact_status` matches model-invented ids (tests coincidence, not retention) | identified |
-| nb04 | eval 5 crashes (`round(None)`) on the card-lost-a-fact case it exists to catch | identified |
-| nb04 | eval 3 passes vacuously on `0 ≥ 0` — doesn't enforce "skills help" | identified |
 | nb02 | `hold` notes are never re-triaged (stranded) | identified |
-| nb00 | Langfuse check is a false-green — `flush()` never raises | identified |
-| nb01 | skill staleness is a cosmetic label; `schema_sha` ignores length/nullability | deferred |
+| nb00 | Langfuse check is a false-green — `flush()` never raises, no `auth_check` | identified |
+| nb01 | no skill-staleness signal at all: `schema_sha` was cut as the wrong layer, and its `tools_sha` replacement is designed but not built | deferred |
 
 The pattern behind most of them is principle #6: **silent state accumulation** —
 duplicates, un-reset flags, unpopulated columns — breaking a downstream assertion

@@ -10,14 +10,29 @@ foundation → 01 self-improving copilot → 02 scheduled briefings → 03 conte
 engineering → 04 evals.
 
 - Design spec: `docs/superpowers/specs/2026-07-21-cityops-agent-harness-design.md`
-- Phase plans: `docs/superpowers/plans/` (one per phase; the checkboxes in each
-  plan are the progress record — there is no separate ledger).
+- Phase plans: `docs/superpowers/plans/` (one per phase). Their checkboxes were
+  never ticked during the build — treat each plan as the *intended* design, and
+  the git history plus the status block below as the progress record. The open
+  gap list lives in `docs/WALKTHROUGH.md` §7.
 
-Status at last update (2026-07-24): **the whole series (foundation + notebooks
+Status at last update (2026-10-08): **the whole series (foundation + notebooks
 00–04) is complete**, each verified live end-to-end with zero cell errors.
 Phase 04 (evals) runs its five evals as Langfuse datasets with scored traces via
 the 4.x Experiments API; the local Langfuse stack must be up (see below).
-Remaining deferred work: strength-based card consolidation (design spec).
+Strength-based card consolidation — once the only deferred item — was built
+2026-07-25 (notebook 03 §4b).
+
+Live-verification currency, which drifts as notebooks change: nb01 re-verified
+2026-08-13, nb02 2026-08-11, nb00 2026-07-25. **nb03 has not been re-run live
+since the `merge_card` strength fix** (2026-08-10, unit-tested only) and that fix
+changes §4b's reinforcement behaviour; **nb04 has not been re-run since
+2026-07-24** and now carries fixes to evals 3 and 5 (2026-10-08) that have only
+been verified offline against synthetic results. Both are owed a live pass.
+
+Remaining work is tracked in `docs/WALKTHROUGH.md` §7 (four open gaps: nb02
+`days_ago`, nb02 stranded `hold` notes, nb03 `fact_status` id matching, nb00's
+false-green Langfuse check) plus the deferred `tools_sha` skill-freshness
+redesign and its notebook-04 stale-skill eval.
 
 The `CREATE PROCEDURE` / `CREATE JOB` grants are in place, and
 `HARNESS_STAGE_JOB` (hourly) and `HARNESS_BRIEFING_JOB` (daily 06:00) are left
@@ -39,8 +54,11 @@ All work is on `main`; the `foundation` branch is history.
 - Implementation closes the promotion gaps in `memory_promotion_review.md`
   (curation gate, verified success, skill lifecycle, provenance/supersession);
   the 5 Langfuse evals in notebook 04 target that review's "silent on" column.
-- Live-calibrated retrieval thresholds (notebook 01): TOOL_DISTANCE_MAX=0.92,
-  SKILL_DISTANCE_MAX=0.65.
+- Notebook 01 retrieves *skills* by embedding distance (live-calibrated
+  `SKILL_DISTANCE_MAX=0.65`) but **not tools**: tool retrieval by distance
+  (`TOOL_DISTANCE_MAX=0.92`) was replaced 2026-08-11 by progressive disclosure —
+  a hot core plus capability groups behind an `open_capability` meta-tool. A
+  distance floor failed silently; an explicit request is a visible step.
 - Naming: professional/descriptive names, not whimsical.
 
 ## Environment
@@ -56,7 +74,9 @@ All work is on `main`; the `foundation` branch is history.
 
 ## Known carry-overs / untested
 
-- **Strength-based card consolidation: BUILT** (2026-07-24, live-verified).
+- **Strength-based card consolidation: BUILT** (2026-07-25, live-verified then —
+  but that pass predates the 2026-08-10 `merge_card` strength fix, so §4b's
+  reinforcement curve has not been seen live in its corrected form).
   Helpers `fact_strength` / `select_for_eviction` / `fact_status` in
   `context.py`; demonstrated in notebook 03 §4b. The additive card (§3) is kept
   on purpose as the "never compresses" setup; §4b adds a ceiling + reinforcement
