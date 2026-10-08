@@ -22,17 +22,27 @@ the 4.x Experiments API; the local Langfuse stack must be up (see below).
 Strength-based card consolidation — once the only deferred item — was built
 2026-07-25 (notebook 03 §4b).
 
-Live-verification currency, which drifts as notebooks change: nb01 re-verified
-2026-08-13, nb02 2026-08-11, nb00 2026-07-25. **nb03 has not been re-run live
-since the `merge_card` strength fix** (2026-08-10, unit-tested only) and that fix
-changes §4b's reinforcement behaviour; **nb04 has not been re-run since
-2026-07-24** and now carries fixes to evals 3 and 5 (2026-10-08) that have only
-been verified offline against synthetic results. Both are owed a live pass.
+Live-verification currency, which drifts as notebooks change: nb03 re-verified
+2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 2026-08-13,
+nb02 2026-08-11, nb00 2026-07-25. That nb03 pass is the first since the
+2026-08-10 `merge_card` strength fix and confirms §4b live: the facts list grows
+to 10 then *shrinks* to 6 as gist absorbs 4 evicted facts, holding ~4.2k against
+the 4000-char ceiling while the additive card runs to 14.7k, with no planted fact
+fully lost. **nb04 has not been re-run since 2026-07-24** and now carries fixes
+to evals 3 and 5 (2026-10-08) verified only offline against synthetic results, so
+it is still owed a live pass (needs the Langfuse stack up).
 
 Remaining work is tracked in `docs/WALKTHROUGH.md` §7 (four open gaps: nb02
 `days_ago`, nb02 stranded `hold` notes, nb03 `fact_status` id matching, nb00's
 false-green Langfuse check) plus the deferred `tools_sha` skill-freshness
 redesign and its notebook-04 stale-skill eval.
+
+Assertion design is its own failure mode, twice now: notebook 03 §5 failed live
+on a *lexical sort over four tied finding_ids* while the mechanism under test
+(fetch the blob, read the payload) worked perfectly, and notebook 04's evals 3
+and 5 could pass vacuously or crash on the exact cases they existed to catch.
+Keep an assertion on the mechanism it names - a check that fails for an unrelated
+sub-skill, or cannot fail at all, measures nothing.
 
 The `CREATE PROCEDURE` / `CREATE JOB` grants are in place, and
 `HARNESS_STAGE_JOB` (hourly) and `HARNESS_BRIEFING_JOB` (daily 06:00) are left
