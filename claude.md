@@ -24,8 +24,8 @@ Strength-based card consolidation — once the only deferred item — was built
 
 Live-verification currency, which drifts as notebooks change: nb03 re-verified
 2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 2026-08-13,
-nb02 2026-08-11 **on 26.6 — its 26.8 §7c graph-relation section has never run
-live, pending the CREATE TRIGGER grant**, nb00 2026-07-25. That nb03 pass is the first since the
+nb02 **2026-10-08 on 26.8 / schema v13: 0 cell errors, 39 green checks**
+(`LANGFUSE_MODE=off`), §7c included, nb00 2026-07-25. That nb03 pass is the first since the
 2026-08-10 `merge_card` strength fix and confirms §4b live: the facts list grows
 to 10 then *shrinks* to 6 as gist absorbs 4 evicted facts, holding ~4.2k against
 the 4000-char ceiling while the additive card runs to 14.7k, with no planted fact
@@ -78,6 +78,25 @@ All work is on `main`; the `foundation` branch is history.
   contrast. Still capped below 27, where `table_name_prefix` is removed and
   nb02 reads `CITY_MEMORY` by that prefix. Floor also forces
   `litellm>=1.95.1` and (transitively) `cryptography>=50`.
+- **26.8 consolidates memories on its own, and `extract_memories=False` does not
+  stop it.** Established live 2026-10-08: after notebook 02 §4 promotion, the
+  store had written 19 relations into `CITY_MEMORY_LINK` (`supersedes`,
+  `duplicates`, `supports`, `contradicts`, all with `METADATA` NULL, i.e. none
+  of ours) and flipped 8 memories to `status='invalid'`. So nb02's hand-rolled
+  supersession is now *redundant bookkeeping* - the platform does it at
+  `add_memory` time. §7c is written around that: it observes the relation the
+  store made, traverses it, deletes it (the trigger revalidates), and TODO(6)
+  writes it back by hand. What §7 still owns is the triage gate (what becomes
+  durable at all) and our own provenance (source path, revision); what it no
+  longer needs is `superseded_by`. Do not write a §7c that *creates* the link -
+  it raises `ValueError: A conflicting memory relation already exists.`
+- API shapes worth not re-deriving: `search(num_hops=1)` attaches
+  `linked_results` as a `list[tuple[RecordRelation, SearchResult]]` where the
+  result is the *neighbour* endpoint in whichever direction the relation was
+  stored; `SearchResult.status` is a `RecordStatus` enum (`.value` is
+  'valid'/'invalid'). v13 drops the per-store
+  `<PREFIX>ORACLEAGENTMEMORY_SCHEMA_META` table (stores are registered
+  centrally) and adds `<PREFIX>DOCUMENT` and `<PREFIX>THREAD_SUMMARY`.
 - Naming: professional/descriptive names, not whimsical.
 
 ## Environment
@@ -101,25 +120,26 @@ All work is on `main`; the `foundation` branch is history.
   on purpose as the "never compresses" setup; §4b adds a ceiling + reinforcement
   + gist eviction that holds ~4k while additive runs to ~16k, scored three-way
   (verbatim/gist/lost). Design write-up remains in the spec.
-- **Blocked on ADMIN (2026-10-08): `GRANT CREATE TRIGGER TO ANANT;`** —
-  oracleagentmemory 26.8's managed schema (v13) adds a `<PREFIX>MEMORY_LINK`
-  table plus `<PREFIX>MEMORY_LINK_DELETE_TRG`, which revalidates a memory when
-  an invalidating relation is deleted. ANANT has CREATE TABLE/VIEW/SEQUENCE/
-  PROCEDURE/JOB/MATERIALIZED VIEW/MINING MODEL/PROPERTY GRAPH but **not**
-  CREATE TRIGGER, so every 26.8 store open fails `ORA-01031` — fresh creates
-  and upgrades alike, and `REQUIRE_EXISTING` too (it demands v13). Until the
-  grant lands, **notebook 02 cannot run at all on 26.8** and §7c is unverified
-  live. Verified by sandbox (prefix `SBX*`, created and dropped; `CITY_` never
-  touched).
-- **The v12 → v13 upgrade is NOT atomic.** Proven on a sandbox store: it
-  retypes `MESSAGE.CONTENT` CLOB → JSON and *then* creates the trigger, so a
-  run without the privilege leaves the store stamped `schema_version=12` while
-  carrying a v13 column — 26.8 can't finish it and 26.6 fails `ORA-01790` on
-  the type mismatch. Notebook 02 §0 therefore checks CREATE PROCEDURE, CREATE
-  JOB and CREATE TRIGGER and raises *before* the store is opened; `check()`
-  raises, so the notebook stops at a red check with a GRANT to copy rather
-  than half-migrating a live store. Never "just try it" against `CITY_`.
-  CITY_ is at v12, `CITY_MESSAGE.CONTENT` still CLOB.
+- **RESOLVED 2026-10-08: `GRANT CREATE TRIGGER TO ANANT` is in place**, and the
+  `CITY_` store now runs at schema v13 with `CITY_MEMORY_LINK` +
+  `CITY_MEMORY_LINK_DELETE_TRG`. Getting there cost two failed runs and is worth
+  not repeating: **never upgrade an existing store in place - recreate it.** The
+  first attempt failed on the missing grant; the second, with the grant, failed
+  on `ORA-00054` (exclusive DDL lock, no wait) from one stray session, and left
+  the store stamped v12 carrying a v13 `MESSAGE.CONTENT JSON` column - readable
+  by neither SDK version. §0's privilege gate cannot prevent the lock variant.
+  The SDK then judged that state unupgradeable and rebuilt the schema clean,
+  which is the path to take deliberately. Cost of a recreate: promoted memories
+  replay from `HARNESS_SCRATCH`, but the prerequisite workshop's `CITY_THREAD`
+  rows do not - re-run `notebook_complete_ollama.ipynb` for those. Learners are
+  unaffected: a new store is created at v13 directly.
+- Why that grant is needed at all: v13's `<PREFIX>MEMORY_LINK_DELETE_TRG`
+  revalidates a memory when an invalidating relation is deleted. Without
+  CREATE TRIGGER *every* 26.8 store open fails `ORA-01031` - fresh creates and
+  upgrades alike, and `REQUIRE_EXISTING` too (it demands v13) - so nb02 cannot
+  run at all. §0 checks CREATE PROCEDURE, CREATE JOB and CREATE TRIGGER and
+  raises before the store is opened, so a missing grant is a red check rather
+  than a half-migrated store. It cannot guard the `ORA-00054` lock variant.
 - **Blocked on ADMIN:** `GRANT CREATE PROCEDURE TO ANANT;` and
   `GRANT CREATE JOB TO ANANT;` — phase 02 task 7 cannot run without them.
   (Both are in place on this ADB.) Notebook 03 deliberately needs neither.

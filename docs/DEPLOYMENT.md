@@ -105,17 +105,47 @@ green check.
 >
 > `CREATE TRIGGER` arrived with Oracle Agent Memory 26.8: its managed schema
 > (v13) adds a `<PREFIX>MEMORY_LINK` table and a delete trigger that revalidates
-> memories when an invalidating relation goes away. The v12 → v13 upgrade is
-> **not atomic** — it retypes `MESSAGE.CONTENT` (`CLOB` → `JSON`) and only then
-> creates the trigger, so running without the privilege against a store built by
-> an older SDK leaves it stamped v12 carrying a v13 column, which neither SDK
-> version can read. Notebook 02 §0 verifies the privileges and refuses to
-> continue before any schema DDL runs, so the failure mode is a red check with a
-> `GRANT` to copy rather than a half-migrated store. If you hit it anyway,
-> recreate the store: `DROP TABLE CITY_MEMORY/CITY_MESSAGE/CITY_THREAD/`
-> `CITY_RECORD_CHUNKS/CITY_ACTOR_PROFILE/CITY_ORACLEAGENTMEMORY_SCHEMA_META`
-> and re-run notebook 02 (the notes themselves live in `HARNESS_SCRATCH`, so
-> promotion replays).
+> memories when an invalidating relation goes away. Notebook 02 §0 verifies the
+> privileges before any schema DDL runs, so a missing grant is a red check with a
+> `GRANT` to copy rather than a broken store.
+
+**Starting fresh? Nothing below applies.** A new store is created directly at
+v13 and none of this is reachable. The rest of this section is for an existing
+store built by an older SDK.
+
+> **Prefer recreating an old store over upgrading it in place.** The v12 → v13
+> upgrade is **not atomic**: it retypes `MESSAGE.CONTENT` (`CLOB` → `JSON`)
+> first and creates the trigger afterwards, so anything that interrupts it
+> between those steps leaves the store stamped v12 while carrying a v13 column —
+> a state neither SDK version can read. Two things interrupt it in practice: a
+> missing `CREATE TRIGGER` (`ORA-01031`), and an exclusive DDL lock it will not
+> wait for (`ORA-00054`) — the latter needs only one other session holding the
+> table, which a stray notebook kernel will do. A privilege check cannot prevent
+> the second one.
+>
+> To recreate: drop the managed tables and re-run notebook 02, which creates
+> them clean at v13.
+>
+> ```sql
+> DROP TABLE CITY_MEMORY CASCADE CONSTRAINTS PURGE;
+> DROP TABLE CITY_MEMORY_LINK CASCADE CONSTRAINTS PURGE;
+> DROP TABLE CITY_MESSAGE CASCADE CONSTRAINTS PURGE;
+> DROP TABLE CITY_THREAD CASCADE CONSTRAINTS PURGE;
+> DROP TABLE CITY_THREAD_SUMMARY CASCADE CONSTRAINTS PURGE;
+> DROP TABLE CITY_DOCUMENT CASCADE CONSTRAINTS PURGE;
+> DROP TABLE CITY_RECORD_CHUNKS CASCADE CONSTRAINTS PURGE;
+> DROP TABLE CITY_ACTOR_PROFILE CASCADE CONSTRAINTS PURGE;
+> -- v12 stores also have CITY_ORACLEAGENTMEMORY_SCHEMA_META; v13 registers
+> -- stores centrally instead, so that table only exists on an un-upgraded store.
+> ```
+>
+> Never drop `CITY_ASSET` or `CITY_INSPECTION_FINDING` — those are the domain
+> tables from the prerequisite workshop, not the memory store, and notebook 01
+> requires them.
+>
+> What a recreate costs: promoted memories replay from `HARNESS_SCRATCH` on the
+> next notebook 02 run, but conversation threads from the prerequisite workshop
+> notebook do not — re-run that notebook if you want them back.
 
 Notebooks **00–03 run with `LANGFUSE_MODE=off`**. Only **notebook 04 (evals)
 requires Langfuse** — set `LANGFUSE_MODE=local` and bring up the stack below.
