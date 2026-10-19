@@ -229,11 +229,10 @@ Add `-v` to also delete the stored traces/datasets:
 docker compose -f docker-compose.langfuse.yml -f docker-compose.langfuse.override.yml down -v
 ```
 
-**Stop the ADB scheduler jobs** notebook 02 leaves running (they fire hourly /
-daily by design). From any notebook cell or SQL client:
+**Stop the ADB scheduler job** notebook 02 leaves running (it fires daily by
+design). From any notebook cell or SQL client:
 
 ```sql
-BEGIN DBMS_SCHEDULER.DISABLE('HARNESS_STAGE_JOB');    END;
 BEGIN DBMS_SCHEDULER.DISABLE('HARNESS_BRIEFING_JOB'); END;
 ```
 

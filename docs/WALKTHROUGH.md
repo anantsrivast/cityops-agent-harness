@@ -245,8 +245,8 @@ is designed but unbuilt. See §7.
 **Why:** the review's Path-1 verdict — *"everything graduates within the hour, 200-
 word chunks get re-extracted into confident misreadings, nothing has provenance,
 nothing is forgotten, and the consumer is never actually scheduled."* This notebook
-rebuilds scratch→long-term promotion as a **curated, provenanced, scheduled**
-pipeline.
+rebuilds scratch→long-term promotion as a **curated, provenanced** step, and ends in a
+**scheduled** morning briefing the database builds on its own.
 
 The scratch store is a small filesystem-in-a-table: each note is a row with a
 **path** (a policy label), content, and a status.
@@ -254,13 +254,11 @@ The scratch store is a small filesystem-in-a-table: each note is a row with a
 ```mermaid
 flowchart LR
   w["remember() / write_note()"] --> SC[("HARNESS_SCRATCH<br/>status = N")]
-  SC -->|"path LIKE /inbox/%"| JOB["HARNESS_STAGE_JOB<br/>(hourly, in-DB)"]
-  JOB --> Q[("HARNESS_PROMOTION_QUEUE")]
-  Q --> DR["drain_queue<br/>(consumer)"]
-  DR --> TG{"store's extraction<br/>(our curation instructions)"}
+  SC --> PN["promote_note(path)"]
+  PN -->|"outside /inbox"| DD["status D"]
+  PN -->|"/inbox"| TG{"store's extraction<br/>(our curation instructions)"}
   TG -->|kept| PR["one verbatim memory in CITY_MEMORY<br/>+ provenance metadata · status P"]
-  TG -->|dropped| DD["status D"]
-  DR --> HC["queue_health → ok / warn / stalled"]
+  TG -->|dropped| DD
 ```
 
 ### 3.0 · Where notes come from: the copilot as a producer (§2b)
@@ -302,7 +300,7 @@ stateDiagram-v2
 The SDK's built-in extraction prompt asks for small *atomic* facts — the
 chunk-and-reinterpret the review warned about. Our instructions override it for the
 inbox thread: a kept note becomes **exactly one** `memory` record, **word for word**.
-§5 checks that rather than trusting it, so an SDK change that stops honouring the
+§4 checks that rather than trusting it, so an SDK change that stops honouring the
 override fails loudly.
 
 Provenance needs no table of ours. Each note is posted with `metadata={source_path,
@@ -335,9 +333,9 @@ memory with the asset's existing ones and writes the relation. `supersedes`, `re
 `record_types=["memory"]` — the thread's raw messages are searchable too, and messages are
 never invalidated.
 
-### 3.3b · The relation itself (§7c)
+### 3.3b · The relation itself (§6c)
 
-§7c looks at the relation the store wrote as **data**: one hop from the superseded memory
+§6c looks at the relation the store wrote as **data**: one hop from the superseded memory
 reaches what replaced it (*what did we believe before, and what changed it?*), deleting the
 link revalidates the old memory, and `link_records` asserts a relation the store missed.
 The store does the bookkeeping and the judging; we write the policy — the gate, the
@@ -347,16 +345,13 @@ This is also where the `CREATE TRIGGER` prerequisite comes from: the managed v13
 schema carries a delete trigger on the link table that returns an invalidated
 memory to `valid` when its invalidating relation goes away.
 
-### 3.4 · Actually scheduled, with a pulse
+### 3.4 · The scheduled briefing
 
-The review's sharpest point: the producer was scheduled but the consumer only ran
-when a human ran a cell — *"silently half-works, which is worse than visibly
-failing."* Here the **producer** (`HARNESS_STAGE_JOB`) is pure SQL inside the
-database on an hourly schedule; the **consumer** drains the queue; and
-`queue_health` turns depth + age into an **ok / warn / stalled** status a dashboard
-can alert on. The payoff is a scheduled **morning briefing**: the database computes
-the numbers (no LLM in the loop, so it can't hallucinate a figure) and the model
-only narrates them.
+Promotion is one `promote_note` call per note, made wherever notes are written; the
+notebook does not teach queueing or orchestration, which are not memory concerns. What
+*is* scheduled is the payoff: `HARNESS_BRIEFING_JOB` builds a daily **morning
+briefing** inside the database. The database computes the numbers (no LLM in the loop,
+so it can't hallucinate a figure) and the model only narrates them.
 
 ---
 

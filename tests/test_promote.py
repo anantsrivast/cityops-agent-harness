@@ -1,6 +1,5 @@
 from cityops_harness.promote import (
     note_revision,
-    queue_health,
     rerank_by_recency,
     triage_allowed,
 )
@@ -19,18 +18,6 @@ def test_triage_allowed_only_inbox():
     assert triage_allowed("/tool_out/dump.json") is False
     assert triage_allowed("/plans/briefing_plan.md") is False
     assert triage_allowed("inbox/no-leading-slash.md") is False
-
-
-def test_queue_health_ok_warn_stalled():
-    assert queue_health(0, None) == "ok"
-    assert queue_health(3, 10) == "ok"
-    assert queue_health(10, 5) == "warn"          # pending at warn threshold
-    assert queue_health(2, 120) == "stalled"      # old items dominate
-    assert queue_health(50, 300) == "stalled"     # stalled beats warn
-
-
-def test_queue_health_empty_queue_never_stalls():
-    assert queue_health(0, 999) == "ok"
 
 
 def test_rerank_by_recency_prefers_fresh_equally_relevant():

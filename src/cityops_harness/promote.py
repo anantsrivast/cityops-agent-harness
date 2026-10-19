@@ -42,20 +42,6 @@ def triage_allowed(path: str, allowed_prefix: str = "/inbox/") -> bool:
     return path.startswith(allowed_prefix)
 
 
-def queue_health(
-    pending: int,
-    oldest_age_minutes: float | None,
-    warn_pending: int = 10,
-    stall_minutes: int = 120,
-) -> str:
-    """A stalled pipeline must be visible, not silent (the review's Path-1 #2)."""
-    if pending > 0 and oldest_age_minutes is not None and oldest_age_minutes >= stall_minutes:
-        return "stalled"
-    if pending >= warn_pending:
-        return "warn"
-    return "ok"
-
-
 def rerank_by_recency(
     rows: list[dict],
     half_life_days: float = 90.0,

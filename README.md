@@ -55,8 +55,8 @@ cp .env.example .env        # fill in DB_PASSWORD, WALLET_PASSWORD, keys
 >
 > ```sql
 > GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;   -- nb00: loads the ONNX model
-> GRANT CREATE PROCEDURE TO <your_user>;        -- nb02: scheduled pipeline
-> GRANT CREATE JOB TO <your_user>;              -- nb02: scheduled pipeline
+> GRANT CREATE PROCEDURE TO <your_user>;        -- nb02: scheduled briefing
+> GRANT CREATE JOB TO <your_user>;              -- nb02: scheduled briefing
 > GRANT CREATE TRIGGER TO <your_user>;          -- nb02: Agent Memory v13 schema
 > ```
 >

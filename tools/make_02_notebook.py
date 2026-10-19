@@ -30,7 +30,6 @@ INTRO = [
         "| Everything graduates within the hour | **Opt-in** `/inbox` + the store's own **extraction** as the gate, under *your* curation instructions |\n"
         "| 200-word chunks re-extracted by the LLM | **Whole-note memories**, verbatim - instructed, then *checked* |\n"
         "| No provenance, nothing supersedes | Provenance as **memory metadata**; supersession as the store's own **relations** |\n"
-        "| Consumer never actually scheduled | In-DB **DBMS_SCHEDULER** producer + drainable consumer + **queue-depth health check** |\n"
         "| (bonus) persistence-of-one-fact only | **Continuity of work**: a new session resumes the briefing *plan*, not just facts |\n\n"
         "The payoff: a **morning asset-risk briefing** the database assembles on schedule -\n"
         "the LLM narrates the numbers; it never invents them."
@@ -64,10 +63,10 @@ SETUP = [
     ),
     code(
         "# Three privileges most ADB users lack by default. CREATE PROCEDURE and CREATE JOB\n"
-        "# are for the scheduled pipeline (Section 5). CREATE TRIGGER is for the memory\n"
+        "# are for the scheduled briefing (Section 5). CREATE TRIGGER is for the memory\n"
         "# store itself: Agent Memory 26.8 raised its managed schema to v13, which adds a\n"
         "# <PREFIX>MEMORY_LINK table plus a delete trigger that revalidates memories when\n"
-        "# an invalidating link is removed (Section 7c).\n"
+        "# an invalidating link is removed (Section 6c).\n"
         "#\n"
         "# This gate runs BEFORE the store is opened, and on purpose. The v12 -> v13\n"
         "# upgrade is not atomic: it retypes MESSAGE.CONTENT from CLOB to JSON and only\n"
@@ -174,7 +173,7 @@ SCRATCH = [
         "            content    CLOB NOT NULL,\n"
         "            revision   VARCHAR2(64) NOT NULL,\n"
         "            status     VARCHAR2(1) DEFAULT 'N'\n"
-        "                       CHECK (status IN ('N','S','P','D','H')),\n"
+        "                       CHECK (status IN ('N','P','D')),\n"
         "            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)\"\"\")\n"
         "    conn.commit()\n"
         "\n"
@@ -322,7 +321,7 @@ PRODUCER = [
         "directory names. Watch the `remember(... durable=True/False ...)` calls: the model\n"
         "decides worth, the tool decides where.\n\n"
         "The task is about the expansion-joint anchor bolts on purpose: the pier-2 bearing\n"
-        "notes seeded above are the supersession demo in Section 4, and an agent note on the\n"
+        "notes seeded above are the supersession demo in Section 6, and an agent note on the\n"
         "same defect would compete with them."
     ),
     code(
@@ -378,7 +377,7 @@ PRODUCER = [
         "check(bool(_kept), f\"the copilot filed {len(_kept)} durable note(s) into the inbox\")\n"
         "check(all(promote.triage_allowed(p) == d for d, p in FILED),\n"
         "      \"every durable note landed in /inbox, and every scratch note outside it\")\n"
-        "ok(\"producer wired - the pipeline below stages and triages these notes with the seed\")"
+        "ok(\"producer wired - Section 4 promotes these notes along with the seed\")"
     ),
 ]
 
@@ -400,7 +399,7 @@ TRIAGE = [
         "\n"
         "The SDK's built-in extraction prompt asks for small *atomic* facts - exactly the\n"
         "chunk-and-reinterpret the review warned about. Our instructions are appended to that\n"
-        "prompt and override it for this thread, and Section 5 *checks* that every memory equals\n"
+        "prompt and override it for this thread, and Section 4 *checks* that every memory equals\n"
         "its note word for word - so if a future SDK stops honouring the override, it fails\n"
         "loudly rather than silently paraphrasing.\n"
         "\n"
@@ -462,7 +461,7 @@ PROMOTION = [
         "No sidecar table.\n"
         "\n"
         "Then the store's link step compares the new memory with what the asset already has and\n"
-        "records any relation - a repair note `supersedes` the defect it fixed (Section 7).\n"
+        "records any relation - a repair note `supersedes` the defect it fixed (Section 6).\n"
         "\n"
         "One thing stays ours: **re-runs**. The store treats a re-posted note as a new claim, not\n"
         "a duplicate, so promotion first forgets whatever an earlier promotion of the same path\n"
@@ -518,149 +517,38 @@ PROMOTION = [
         "\n"
         "ok(\"promotion defined: gate -> the store's extraction (keep / drop) -> provenance on the memory\")"
     ),
-]
-
-# --------------------------------------------------------------------------
-# Section: the scheduled pipeline
-# --------------------------------------------------------------------------
-PIPELINE = [
     md(
-        "## 5 · Actually scheduled: producer in the database, consumer with a pulse\n\n"
-        "The review's sharpest Path-1 finding: the producer was a real scheduled job but the\n"
-        "consumer only ever ran when a human ran a cell - *\"the pipeline silently half-works,\n"
-        "which is worse than visibly failing.\"* Here:\n\n"
-        "- the **producer** (`HARNESS_STAGE_JOB`, hourly) is pure SQL inside the database -\n"
-        "  it stages new inbox notes into a queue whether or not any Python process exists\n"
-        "- the **consumer** (`drain_queue`) runs the triage/promotion pipeline; in production\n"
-        "  your orchestrator schedules it - and because that can fail, the\n"
-        "- **health check** turns queue depth + age into an ok/warn/stalled status a\n"
-        "  dashboard can alert on. A stalled pipeline is *visible*."
+        "**Promote the inbox.** One `promote_note` call per new note - the seed, the copilot's\n"
+        "notes from Section 2b, and the working files outside `/inbox` (which the gate drops\n"
+        "without a model call). In production this runs wherever notes are written: right\n"
+        "after `remember()`, or from whatever scheduler you already run."
     ),
     code(
-        "if not _table_exists(\"HARNESS_PROMOTION_QUEUE\"):\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"\"\"CREATE TABLE HARNESS_PROMOTION_QUEUE (\n"
-        "            queue_id    VARCHAR2(64) PRIMARY KEY,\n"
-        "            path        VARCHAR2(512) NOT NULL,\n"
-        "            enqueued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
-        "            consumed    VARCHAR2(1) DEFAULT 'N' CHECK (consumed IN ('N','Y')))\"\"\")\n"
-        "    conn.commit()\n"
-        "\n"
-        "# Re-run safety, and the reason the health reading below means anything. Queue rows\n"
-        "# left unconsumed by an earlier run keep their original enqueued_at, so MIN() reports\n"
-        "# an age in *days* and a freshly staged queue reads as 'stalled' before it has had a\n"
-        "# chance to be anything. Same silent-state-accumulation trap as the duplicate\n"
-        "# memories in Section 4: the number is right, the state it summarises is stale.\n"
+        "# Earlier versions of this notebook staged notes through a queue and an hourly job.\n"
+        "# Retire them if present, so nothing else touches the scratchpad behind our back.\n"
         "with conn.cursor() as cur:\n"
-        "    cur.execute(\"DELETE FROM HARNESS_PROMOTION_QUEUE\")\n"
-        "conn.commit()\n"
-        "\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"\"\"CREATE OR REPLACE PROCEDURE HARNESS_STAGE_INBOX AS\n"
-        "    BEGIN\n"
-        "      INSERT INTO harness_promotion_queue (queue_id, path)\n"
-        "      SELECT RAWTOHEX(SYS_GUID()), s.path\n"
-        "        FROM harness_scratch s\n"
-        "       WHERE s.status = 'N' AND s.path LIKE '/inbox/%'\n"
-        "         AND NOT EXISTS (SELECT 1 FROM harness_promotion_queue q\n"
-        "                          WHERE q.path = s.path AND q.consumed = 'N');\n"
-        "      UPDATE harness_scratch SET status = 'S'\n"
-        "       WHERE status = 'N' AND path LIKE '/inbox/%';\n"
-        "      COMMIT;\n"
-        "    END;\"\"\")\n"
-        "ok(\"producer procedure HARNESS_STAGE_INBOX compiled\")"
-    ),
-    code(
-        "def _replace_job(name, action, repeat, start_offset_minutes=1):\n"
-        "    with conn.cursor() as cur:\n"
+        "    for _ddl in (\"BEGIN DBMS_SCHEDULER.DROP_JOB('HARNESS_STAGE_JOB'); END;\",\n"
+        "                 \"DROP PROCEDURE HARNESS_STAGE_INBOX\",\n"
+        "                 \"DROP TABLE HARNESS_PROMOTION_QUEUE PURGE\"):\n"
         "        try:\n"
-        "            cur.callproc(\"DBMS_SCHEDULER.DROP_JOB\", [name])\n"
+        "            cur.execute(_ddl)\n"
         "        except Exception:\n"
-        "            pass\n"
-        "        cur.execute(\"\"\"BEGIN\n"
-        "            DBMS_SCHEDULER.CREATE_JOB(\n"
-        "                job_name        => :name,\n"
-        "                job_type        => 'STORED_PROCEDURE',\n"
-        "                job_action      => :action,\n"
-        "                start_date      => SYSTIMESTAMP + NUMTODSINTERVAL(:offs, 'MINUTE'),\n"
-        "                repeat_interval => :rep,\n"
-        "                enabled         => TRUE);\n"
-        "        END;\"\"\", name=name, action=action, rep=repeat, offs=start_offset_minutes)\n"
-        "    conn.commit()\n"
+        "            pass  # not there - nothing to retire\n"
         "\n"
+        "# Only NEW notes: a re-run must not re-promote what an earlier run already settled.\n"
+        "_new = [p for p, s in list_notes(\"/\") if s == \"N\"]\n"
+        "for p in _new:\n"
+        "    mid = promote_note(p)\n"
+        "    print(f\"  {read_note(p)['status']}  {p}\" + (f\"  -> memory {mid[:12]}...\" if mid else \"\"))\n"
         "\n"
-        "_replace_job(\"HARNESS_STAGE_JOB\", \"HARNESS_STAGE_INBOX\", \"FREQ=HOURLY\")\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"\"\"SELECT job_name, enabled, repeat_interval\n"
-        "                     FROM user_scheduler_jobs WHERE job_name = 'HARNESS_STAGE_JOB'\"\"\")\n"
-        "    print(cur.fetchone())\n"
-        "# Fire it now rather than waiting an hour - same code path the schedule runs.\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.callproc(\"DBMS_SCHEDULER.RUN_JOB\", [\"HARNESS_STAGE_JOB\", True])\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"SELECT COUNT(*) FROM HARNESS_PROMOTION_QUEUE WHERE consumed = 'N'\")\n"
-        "    _pending = cur.fetchone()[0]\n"
-        "check(_pending >= 5, f\"producer staged {_pending} inbox notes into the queue\")"
-    ),
-    code(
-        "def drain_queue(limit=50):\n"
-        "    \"\"\"The consumer: triage -> supersession -> whole-note promotion, per queue item.\n"
-        "    In production an orchestrator runs this on its own schedule.\"\"\"\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"\"\"SELECT queue_id, path FROM HARNESS_PROMOTION_QUEUE\n"
-        "                       WHERE consumed = 'N' ORDER BY enqueued_at\n"
-        "                       FETCH FIRST :n ROWS ONLY\"\"\", n=limit)\n"
-        "        items = cur.fetchall()\n"
-        "    done = 0\n"
-        "    for qid, path in items:\n"
-        "        mid = promote_note(path)\n"
-        "        with conn.cursor() as cur:\n"
-        "            cur.execute(\"UPDATE HARNESS_PROMOTION_QUEUE SET consumed = 'Y' \"\n"
-        "                        \"WHERE queue_id = :q\", q=qid)\n"
-        "        conn.commit()\n"
-        "        done += 1\n"
-        "        note_status = read_note(path)[\"status\"]\n"
-        "        print(f\"  {note_status}  {path}\" + (f\"  -> memory {mid[:12]}...\" if mid else \"\"))\n"
-        "    return done\n"
-        "\n"
-        "\n"
-        "def pipeline_health():\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"\"\"SELECT COUNT(*),\n"
-        "                              (CAST(CURRENT_TIMESTAMP AS DATE)\n"
-        "                               - CAST(MIN(enqueued_at) AS DATE)) * 24 * 60\n"
-        "                         FROM HARNESS_PROMOTION_QUEUE WHERE consumed = 'N'\"\"\")\n"
-        "        pending, oldest_minutes = cur.fetchone()\n"
-        "    # ✏️ TODO(3): turn raw pending/oldest-age numbers into an alertable status\n"
-        "    #             with promote.queue_health(pending, oldest_minutes).\n"
-        "    # TODO-SOLUTION-START\n"
-        "    status = promote.queue_health(pending, oldest_minutes)\n"
-        "    # TODO-SOLUTION-END\n"
-        "    print(f\"queue: pending={pending} oldest={oldest_minutes or 0:.0f}min -> {status}\")\n"
-        "    return status\n"
-        "\n"
-        "\n"
-        "check(pipeline_health() in (\"ok\", \"warn\"), \"health visible before draining\")\n"
-        "print(f\"drained {drain_queue()} items\")\n"
-        "check(pipeline_health() == \"ok\", \"queue drained - pipeline healthy\")"
-    ),
-    code(
-        "# The scratchpad contract, restored: working files untouched, inbox curated.\n"
-        "for p, s in list_notes(\"/\"):\n"
-        "    print(f\"{s}  {p}\")\n"
-        "_promoted = [p for p, s in list_notes(\"/inbox/\") if s == \"P\"]\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"\"\"SELECT status, COUNT(*) FROM HARNESS_SCRATCH\n"
-        "                   WHERE path NOT LIKE '/inbox/%' GROUP BY status\"\"\")\n"
-        "    _outside = dict(cur.fetchall())\n"
+        "_promoted = [p for p in _new if read_note(p)[\"status\"] == \"P\"]\n"
         "check(len(_promoted) >= 3, f\"{len(_promoted)} inbox notes promoted, each carrying its provenance\")\n"
         "# The override in Section 3 asked for one verbatim memory per note. Check it, don't trust it.\n"
         "_mems = {p: memories_from(p) for p in _promoted}\n"
         "check(all(len(m) == 1 and m[0].content.strip() == read_note(p)[\"content\"].strip()\n"
         "          for p, m in _mems.items()),\n"
         "      \"every promoted note became exactly one memory, word for word\")\n"
-
-        "check(set(_outside) <= {\"N\", \"D\"}, \"nothing outside /inbox was staged or promoted\")"
+        "check(all(passes_gate(p) for p in _promoted), \"nothing outside /inbox was promoted\")"
     ),
 ]
 
@@ -669,9 +557,9 @@ PIPELINE = [
 # --------------------------------------------------------------------------
 BRIEFING = [
     md(
-        "## 6 · The morning briefing: the database computes, the model narrates\n\n"
+        "## 5 · The morning briefing: the database computes, the model narrates\n\n"
         "`HARNESS_BUILD_BRIEFING` runs daily at 06:00 **inside the database** - it aggregates\n"
-        "recent findings, queue health, and memory counts into a JSON payload with plain SQL.\n"
+        "recent findings and memory counts into a JSON payload with plain SQL.\n"
         "No LLM in the loop, so it cannot hallucinate a number. The narrative layer runs when\n"
         "a human reads the briefing - grounded, by instruction, in only the JSON's numbers."
     ),
@@ -691,8 +579,7 @@ BRIEFING = [
         "    BEGIN\n"
         "      SELECT JSON_OBJECT(\n"
         "        'generated_for' VALUE TO_CHAR(SYSDATE, 'YYYY-MM-DD'),\n"
-        "        'queue_pending' VALUE (SELECT COUNT(*) FROM harness_promotion_queue\n"
-        "                                WHERE consumed = 'N'),\n"
+
         "        -- current, provenanced memories. The one place SQL reads the store's own\n"
         "        -- table: this job runs inside the database, where there is no SDK client.\n"
         "        'curated_memories' VALUE (SELECT COUNT(*) FROM city_memory\n"
@@ -712,6 +599,24 @@ BRIEFING = [
         "      VALUES (RAWTOHEX(SYS_GUID()), payload);\n"
         "      COMMIT;\n"
         "    END;\"\"\")\n"
+        "\n"
+        "def _replace_job(name, action, repeat, start_offset_minutes=1):\n"
+        "    with conn.cursor() as cur:\n"
+        "        try:\n"
+        "            cur.callproc(\"DBMS_SCHEDULER.DROP_JOB\", [name])\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "        cur.execute(\"\"\"BEGIN\n"
+        "            DBMS_SCHEDULER.CREATE_JOB(\n"
+        "                job_name        => :name,\n"
+        "                job_type        => 'STORED_PROCEDURE',\n"
+        "                job_action      => :action,\n"
+        "                start_date      => SYSTIMESTAMP + NUMTODSINTERVAL(:offs, 'MINUTE'),\n"
+        "                repeat_interval => :rep,\n"
+        "                enabled         => TRUE);\n"
+        "        END;\"\"\", name=name, action=action, rep=repeat, offs=start_offset_minutes)\n"
+        "    conn.commit()\n"
+        "\n"
         "\n"
         "_replace_job(\"HARNESS_BRIEFING_JOB\", \"HARNESS_BUILD_BRIEFING\",\n"
         "             \"FREQ=DAILY;BYHOUR=6;BYMINUTE=0\")\n"
@@ -736,7 +641,7 @@ BRIEFING = [
         "\n"
         "def narrate_briefing():\n"
         "    b = latest_briefing()\n"
-        "    # ✏️ TODO(4): the grounded narration - ask CHAT for a <=6-sentence morning\n"
+        "    # ✏️ TODO(3): the grounded narration - ask CHAT for a <=6-sentence morning\n"
         "    #             briefing using ONLY numbers present in the JSON payload, then\n"
         "    #             write the narrative back onto the briefing row.\n"
         "    # TODO-SOLUTION-START\n"
@@ -769,9 +674,9 @@ BRIEFING = [
 # --------------------------------------------------------------------------
 RECALL = [
     md(
-        "## 7 · Supersession in action, and recall that prefers the present\n"
+        "## 6 · Supersession in action, and recall that prefers the present\n"
         "\n"
-        "The repair note arrives, is staged by the *scheduled* producer and drained - and the\n"
+        "The repair note arrives and is promoted like any other - and the\n"
         "store's link step recognises that it completes the defect: it writes a `supersedes`\n"
         "relation and flips the defect memory to `invalid`. Nothing of ours decided that.\n"
         "\n"
@@ -785,9 +690,7 @@ RECALL = [
         "           f\"Bearing plates at pier 2 of {ASSET_A} replaced and recoated on today's\"\n"
         "           \" shift; corrosion remediated, section loss addressed. Load rating\"\n"
         "           \" restored to design values. Next scheduled check in 12 months.\")\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.callproc(\"DBMS_SCHEDULER.RUN_JOB\", [\"HARNESS_STAGE_JOB\", True])\n"
-        "print(f\"drained {drain_queue()} item(s)\")\n"
+        "promote_note(SUPERSEDE_REPAIR_PATH)\n"
         "\n"
         "\n"
         "def status_value(m):\n"
@@ -801,7 +704,7 @@ RECALL = [
     code(
         "def recall(query, asset_id, k=5):\n"
         "    \"\"\"Current memories only -> provenance from metadata -> recency re-rank.\"\"\"\n"
-        "    # ✏️ TODO(5): ask the store for CURRENT memory records only: record_types=[\"memory\"]\n"
+        "    # ✏️ TODO(4): ask the store for CURRENT memory records only: record_types=[\"memory\"]\n"
         "    #             (raw thread messages are searchable too, and are never invalidated)\n"
         "    #             and include_invalid_results=False.\n"
         "    # TODO-SOLUTION-START\n"
@@ -836,7 +739,7 @@ RECALL = [
 # --------------------------------------------------------------------------
 TRACE = [
     md(
-        "## 7b · Follow one note, end to end\n\n"
+        "## 6b · Follow one note, end to end\n\n"
         "Every mechanism above touched a *different* note. Here we take a **single** note and\n"
         "watch it move through every stage, printing where it lives after each step - its\n"
         "scratch status, and the memory it became, with its provenance and lifecycle status.\n"
@@ -854,7 +757,7 @@ TRACE = [
         "        cur.execute(\"SELECT status FROM HARNESS_SCRATCH WHERE path = :p\", p=path)\n"
         "        _r = cur.fetchone()\n"
         "    scratch = _r[0] if _r else \"-\"\n"
-        "    _names = {\"N\": \"new\", \"S\": \"staged\", \"P\": \"promoted\", \"D\": \"discarded\", \"H\": \"hold\"}\n"
+        "    _names = {\"N\": \"new\", \"P\": \"promoted\", \"D\": \"discarded\"}\n"
         "    mems = memories_from(path)\n"
         "    if mems:\n"
         "        m = mems[0]\n"
@@ -933,9 +836,9 @@ TRACE = [
 # --------------------------------------------------------------------------
 RELATIONS = [
     md(
-        "## 7c · The relation itself: what the store wrote, and what it buys\n"
+        "## 6c · The relation itself: what the store wrote, and what it buys\n"
         "\n"
-        "Section 7's supersession was never ours: the store's link step wrote a `supersedes`\n"
+        "Section 6's supersession was never ours: the store's link step wrote a `supersedes`\n"
         "relation into the managed `CITY_MEMORY_LINK` table and flipped the defect to `invalid`.\n"
         "This section looks at that relation directly - as **data**, not just a status flag:\n"
         "\n"
@@ -944,7 +847,7 @@ RELATIONS = [
         "| *what is true now?* | `search(..., include_invalid_results=False)` |\n"
         "| *what did we used to believe, and what changed it?* | `num_hops=1` follows the link from the old memory to the new one |\n"
         "| *the store got it wrong* | `delete_record_link` - a trigger revalidates the old memory |\n"
-        "| *I know two memories are related; the store doesn't* | `link_records` (TODO 6) |\n"
+        "| *I know two memories are related; the store doesn't* | `link_records` (TODO 5) |\n"
         "\n"
         "Which relations invalidate? `supersedes`, `refines` and `duplicates` flip their target to\n"
         "`invalid`; `contradicts` and `supports` leave both memories current.\n"
@@ -954,7 +857,7 @@ RELATIONS = [
         "the policy - and check it.**"
     ),
     code(
-        "# The two memories in this relation came from Section 7's promotion of the repair note.\n"
+        "# The two memories in this relation came from Section 6's promotion of the repair note.\n"
         "# Find them by provenance - no sidecar, no raw SQL.\n"
         "_d, _r = memories_from(SUPERSEDE_DEFECT_PATH), memories_from(SUPERSEDE_REPAIR_PATH)\n"
         "DEFECT_MID = _d[0].id if _d else None\n"
@@ -988,7 +891,7 @@ RELATIONS = [
         "    return getattr(hit.status, \"value\", hit.status)"
     ),
     code(
-        "# Nothing below created this. Section 7 posted the repair note; the store linked it.\n"
+        "# Nothing below created this. Section 6 posted the repair note; the store linked it.\n"
         "_defect, _rels = linked(DEFECT_MID)\n"
         "print(f\"relations touching the defect memory ({len(_rels)}):\")\n"
         "for _rel, _other in _rels:\n"
@@ -1005,7 +908,7 @@ RELATIONS = [
         "      \"no column of ours involved\")"
     ),
     md(
-        "**The payoff is not the hiding - it is the asking.** `recall()` in Section 7 can only\n"
+        "**The payoff is not the hiding - it is the asking.** `recall()` in Section 6 can only\n"
         "*suppress* a superseded memory. A relation is data, so one store answers both\n"
         "questions: *what is true now?* and *what did we believe before, and what changed\n"
         "it?* The first is `include_invalid_results=False`; the second is `num_hops=1`."
@@ -1045,7 +948,7 @@ RELATIONS = [
         "      f\"deleting the relation revalidated the memory (status={_restored!r}) - \"\n"
         "      \"the trigger did that, not our code\")\n"
         "\n"
-        "# \u270f\ufe0f TODO(6): put it back by hand. The repair memory SUPERSEDES the defect one -\n"
+        "# \u270f\ufe0f TODO(5): put it back by hand. The repair memory SUPERSEDES the defect one -\n"
         "#             direction matters, and the source is the memory that wins. Both\n"
         "#             endpoints are memory-like records, so pass record_type 'memory' for\n"
         "#             each, and carry the provenance path in metadata so the link explains\n"
@@ -1071,7 +974,7 @@ RELATIONS = [
 # --------------------------------------------------------------------------
 CONTINUITY = [
     md(
-        "## 8 · Continuity: a new session resumes the *work*, not just the facts\n\n"
+        "## 7 · Continuity: a new session resumes the *work*, not just the facts\n\n"
         "The review granted the original notebook fact-persistence but noted the hard half\n"
         "is resuming *work* - goal, done, next. So the briefing workflow keeps its plan as a\n"
         "scratch note, and a brand-new connection + brand-new SDK client picks it up and\n"
@@ -1080,7 +983,7 @@ CONTINUITY = [
     code(
         "write_note(\"/plans/briefing_plan.md\", json.dumps({\n"
         "    \"goal\": \"daily 06:00 asset-risk briefing, grounded narration on read\",\n"
-        "    \"done\": [\"producer + consumer + health check\", \"briefing job scheduled\",\n"
+        "    \"done\": [\"inbox curated into memory\", \"briefing job scheduled\",\n"
         "             \"first briefing narrated\"],\n"
         "    \"next\": \"review narration tone with operations chief; tune half-life\",\n"
         "}))\n"
@@ -1121,17 +1024,17 @@ CONTINUITY = [
 # --------------------------------------------------------------------------
 CLOSING = [
     md(
-        "## 9 · What you built (vs. what the review criticised)\n\n"
+        "## 8 · What you built (vs. what the review criticised)\n\n"
         "| Review gap (Path 1) | Fix you built |\n"
         "|---|---|\n"
         "| Every scratch file graduates | `/inbox` opt-in + the store's extraction under your curation instructions (one verbatim memory, or nothing) |\n"
         "| Chunked re-extraction invents facts | Whole-note memories, verbatim - instructed, and checked |\n"
         "| No provenance, no supersession | Provenance as memory metadata (source path, revision, observed age); supersession as the store's own relations |\n"
-        "| Consumer never scheduled, failure silent | In-DB producer job + drainable consumer + ok/warn/stalled health |\n"
+
         "| Nothing forgets | Superseded memories invalidated, out of current recall; recency weighted by the observation's real age |\n"
         "| Facts persist, work doesn't | Plan state resumed by a fresh session |\n\n"
-        "The jobs stay scheduled after you close this notebook - that is the point. Disable\n"
-        "them any time with `DBMS_SCHEDULER.DISABLE('HARNESS_STAGE_JOB')` /\n"
+        "The briefing job stays scheduled after you close this notebook - that is the point.\n"
+        "Disable it any time with\n"
         "`DBMS_SCHEDULER.DISABLE('HARNESS_BRIEFING_JOB')`.\n\n"
         "Next: **03 - Context engineering**, where compaction and offloading get measured for\n"
         "*fidelity*, not just size."
@@ -1144,7 +1047,7 @@ CLOSING = [
 ]
 
 SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, PRODUCER, TRIAGE, PROMOTION,
-            PIPELINE, BRIEFING, RECALL, TRACE, RELATIONS, CONTINUITY, CLOSING]
+            BRIEFING, RECALL, TRACE, RELATIONS, CONTINUITY, CLOSING]
 
 
 def build() -> nbf.NotebookNode:
