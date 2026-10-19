@@ -51,3 +51,11 @@ def test_rerank_by_recency_relevance_still_matters():
     ]
     out = rerank_by_recency(rows, half_life_days=90.0)
     assert out[0]["id"] == "old_strong"           # 0.5 beats 0.1
+
+
+def test_curation_policy_demands_one_verbatim_memory():
+    # nb02 runs this text and nb04 grades it; both checks assume these rules.
+    from cityops_harness.promote import CURATION_INSTRUCTIONS, LINK_INSTRUCTIONS
+    assert "EXACTLY ONE record" in CURATION_INSTRUCTIONS
+    assert "verbatim" in CURATION_INSTRUCTIONS
+    assert "SUPERSEDES" in LINK_INSTRUCTIONS

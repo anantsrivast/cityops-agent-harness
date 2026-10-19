@@ -76,7 +76,7 @@ def test_registry_seeds_notebook_02():
     checks = REGISTRY["02_scheduled_briefings"]
     sqls = " ".join(c.sql for c in checks)
     assert len(checks) == 6
-    for t in ("HARNESS_SCRATCH", "HARNESS_PROMOTION_QUEUE", "HARNESS_MEMORY_META",
+    for t in ("HARNESS_SCRATCH", "HARNESS_PROMOTION_QUEUE", "CITY_MEMORY_LINK",
               "HARNESS_BRIEFING", "CITY_MEMORY"):
         assert t in sqls
     assert "user_scheduler_jobs" in sqls

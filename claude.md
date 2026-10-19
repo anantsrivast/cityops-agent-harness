@@ -25,19 +25,21 @@ Strength-based card consolidation — once the only deferred item — was built
 Live-verification currency, which drifts as notebooks change: nb03 re-verified
 2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 **2026-10-19: 0 cell errors, 30 green
 checks** (`LANGFUSE_MODE=off`),
-nb02 **2026-10-08 on 26.8 / schema v13: 0 cell errors, 39 green checks**
+nb02 **2026-10-19 on 26.8 (SDK-native curation): 0 cell errors, 43 green checks**
 (`LANGFUSE_MODE=off`), §7c included, nb00 2026-07-25. That nb03 pass is the first since the
 2026-08-10 `merge_card` strength fix and confirms §4b live: the facts list grows
 to 10 then *shrinks* to 6 as gist absorbs 4 evicted facts, holding ~4.2k against
 the 4000-char ceiling while the additive card runs to 14.7k, with no planted fact
 fully lost. **nb04 has not been re-run since 2026-07-24** and now carries fixes
 to evals 3 and 5 (2026-10-08) verified only offline against synthetic results, so
-it is still owed a live pass (needs the Langfuse stack up).
+it is still owed a live pass (needs the Langfuse stack up). Exception: eval 1 was
+rewritten 2026-10-19 to grade nb02's real gate (the SDK's extraction under the shared
+`promote.CURATION_INSTRUCTIONS`, in sandbox user `_eval_promotion`) and passed live
+through Langfuse: precision 1.00, recall 1.00, every kept note one verbatim memory.
 
-Remaining work is tracked in `docs/WALKTHROUGH.md` §7 (four open gaps: nb02
-`days_ago`, nb02 stranded `hold` notes, nb03 `fact_status` id matching, nb00's
-false-green Langfuse check) plus the deferred `tools_sha` skill-freshness
-redesign and its notebook-04 stale-skill eval.
+Remaining work is tracked in `docs/WALKTHROUGH.md` §7 (two open gaps: nb03
+`fact_status` id matching, nb00's false-green Langfuse check) plus the deferred `tools_sha`
+skill-freshness redesign and its notebook-04 stale-skill eval.
 
 Assertion design is its own failure mode, twice now: notebook 03 §5 failed live
 on a *lexical sort over four tied finding_ids* while the mechanism under test
@@ -74,23 +76,40 @@ All work is on `main`; the `foundation` branch is history.
 - `oracleagentmemory>=26.8,<27` (2026-10-08). 26.8 is the floor for graph
   memory - `link_records` / `update_record_link` / `delete_record_link`, link
   traversal at search time (`num_hops`, `max_linked_results`) and
-  `include_invalid_results`; notebook 02 §7c teaches it against the
-  hand-rolled sidecar supersession in §7, which is kept on purpose as the
-  contrast. Still capped below 27, where `table_name_prefix` is removed and
+  `include_invalid_results`; notebook 02 is built on it end to end (see the
+  next entry). Still capped below 27, where `table_name_prefix` is removed and
   nb02 reads `CITY_MEMORY` by that prefix. Floor also forces
   `litellm>=1.95.1` and (transitively) `cryptography>=50`.
-- **26.8 consolidates memories on its own, and `extract_memories=False` does not
-  stop it.** Established live 2026-10-08: after notebook 02 §4 promotion, the
-  store had written 19 relations into `CITY_MEMORY_LINK` (`supersedes`,
-  `duplicates`, `supports`, `contradicts`, all with `METADATA` NULL, i.e. none
-  of ours) and flipped 8 memories to `status='invalid'`. So nb02's hand-rolled
-  supersession is now *redundant bookkeeping* - the platform does it at
-  `add_memory` time. §7c is written around that: it observes the relation the
-  store made, traverses it, deletes it (the trigger revalidates), and TODO(6)
-  writes it back by hand. What §7 still owns is the triage gate (what becomes
-  durable at all) and our own provenance (source path, revision); what it no
-  longer needs is `superseded_by`. Do not write a §7c that *creates* the link -
-  it raises `ValueError: A conflicting memory relation already exists.`
+- **Notebook 02 delegates curation and supersession to the SDK (decided
+  2026-10-19, replacing the hand-rolled triage LLM, supersession LLM and the
+  `HARNESS_MEMORY_META` sidecar).** Each `/inbox` note is posted as a message to
+  its asset's thread; `MemoryExtractionConfig` with
+  `memory_extraction_custom_instructions` is the gate (keep -> one memory, or
+  nothing; no `hold`), link extraction writes `supersedes`, and
+  `memory_extraction_inherit_message_metadata` carries `source_path` / `revision`
+  / `days_ago` onto the memory. Established live in prototypes that day:
+  - The SDK's built-in extraction prompt demands *atomic* facts (6 notes -> 21
+    paraphrased facts by default). Our instructions are appended to it, and an
+    explicit "OVERRIDE ... exactly one record, record_type memory, verbatim"
+    held 7/7. §5 asserts one-memory-per-note and exact equality - keep that
+    check; it is the guard against an SDK prompt change.
+  - The link step can rewrite the *new* memory into a consolidated text that
+    repeats the old one (`updated_source_memory_text`); LINK_INSTRUCTIONS forbids it.
+  - Search returns raw `MessageRecord`s by default, and messages are never
+    invalidated - recall must pass `record_types=["memory"]` (`["fact"]` is the
+    SDK default type and matches nothing here).
+  - A re-posted note becomes a new *valid* memory with no link, so promotion
+    deletes memories by `source_path` first. Do not swallow `delete_memory`
+    errors: that is how the old sidecar and the store drifted apart.
+  - Invalidating relations are `supersedes`, `refines`, `duplicates` (the
+    `CITY_MEMORY_LINK_DELETE_TRG` trigger and a direct test agree);
+    `contradicts` / `supports` leave both memories valid.
+  - The in-database briefing job cannot use the SDK, so it is the one place
+    that reads `CITY_MEMORY` in SQL (`status='valid'`, `JSON_EXISTS(metadata,
+    '$.source_path')`).
+  - Do not write a §7c that *creates* the supersedes link before checking -
+    a conflicting relation raises `ValueError: A conflicting memory relation
+    already exists.`
 - API shapes worth not re-deriving: `search(num_hops=1)` attaches
   `linked_results` as a `list[tuple[RecordRelation, SearchResult]]` where the
   result is the *neighbour* endpoint in whichever direction the relation was

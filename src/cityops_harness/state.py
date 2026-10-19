@@ -54,8 +54,8 @@ REGISTRY: dict[str, list[ArtifactCheck]] = {
             sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_PROMOTION_QUEUE'",
         ),
         ArtifactCheck(
-            description="provenance sidecar HARNESS_MEMORY_META",
-            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_MEMORY_META'",
+            description="SDK memory relations table CITY_MEMORY_LINK",
+            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'CITY_MEMORY_LINK'",
         ),
         ArtifactCheck(
             description="briefing store HARNESS_BRIEFING",

@@ -52,7 +52,7 @@ notebook.**
 flowchart TB
   subgraph L1["src/cityops_harness — pure decision logic (offline, unit-tested)"]
     improve["improve.py<br/>merge/harvest/lifecycle"]
-    promote["promote.py<br/>triage/recency/health"]
+    promote["promote.py<br/>gate policy/recency/health"]
     context["context.py<br/>compaction/offload/strength"]
     evals["evals.py<br/>precision/variance/cost"]
   end
@@ -257,10 +257,9 @@ flowchart LR
   SC -->|"path LIKE /inbox/%"| JOB["HARNESS_STAGE_JOB<br/>(hourly, in-DB)"]
   JOB --> Q[("HARNESS_PROMOTION_QUEUE")]
   Q --> DR["drain_queue<br/>(consumer)"]
-  DR --> TG{"triage gate"}
-  TG -->|keep| PR["promote_note →<br/>CITY_MEMORY + HARNESS_MEMORY_META"]
-  TG -->|discard| DD["status D"]
-  TG -->|hold| HH["status H"]
+  DR --> TG{"store's extraction<br/>(our curation instructions)"}
+  TG -->|kept| PR["one verbatim memory in CITY_MEMORY<br/>+ provenance metadata · status P"]
+  TG -->|dropped| DD["status D"]
   DR --> HC["queue_health → ok / warn / stalled"]
 ```
 
@@ -271,7 +270,7 @@ note, durable)` tool and one read-only search tool. The design choice worth
 internalizing: **the agent is never told about directories.** It judges only *"is this
 worth keeping?"*; the tool files `durable=True` into `/inbox` (the opt-in area) and
 `durable=False` into `/work` (scratch). Placement is policy the tool owns; the agent
-supplies judgement. Its notes then go through the same staging and triage as the
+supplies judgement. Its notes then go through the same staging and curation as the
 hand-seeded ones. (This section lived in notebook 01 as §8b until 2026-10-19; it moved
 here because notes are notebook 02's kind of memory, not notebook 01's.)
 
@@ -280,63 +279,69 @@ here because notes are notebook 02's kind of memory, not notebook 01's.)
 Curation happens **before** anything is durable, in two stages:
 
 1. **Path gate** — `triage_allowed(path)` is one line: `path.startswith("/inbox/")`.
-   Anything in `/work` or `/tool_out` is rejected with no LLM call. The *writer*
-   already signalled intent by choosing the folder.
-2. **LLM triage** — for notes that survive the path gate, a model call returns
-   **keep / discard / hold**, catching junk that was filed in `/inbox` anyway.
+   Anything in `/work` or `/tool_out` never reaches the store, with no LLM call. The
+   *writer* already signalled intent by choosing the folder.
+2. **The store's own extraction** — an inbox note is posted as a message to its asset's
+   thread, and Agent Memory's extraction LLM decides whether it becomes a memory. The
+   *policy* is ours — `promote.CURATION_INSTRUCTIONS`, passed as
+   `memory_extraction_custom_instructions` (it lives in the package so nb04 grades the
+   same text): keep completed,
+   factual observations; extract nothing from TODOs, dead ends, tool output, or work that
+   could not be finished. There is no `hold` — an incomplete note is simply not kept.
 
 ```mermaid
 stateDiagram-v2
   [*] --> N: written
   N --> S: producer stages (/inbox only)
-  S --> P: keep → promoted
-  S --> D: discard
-  S --> H: hold
+  S --> P: extraction keeps it → one memory
+  S --> D: extraction drops it
 ```
 
-### 3.2 · Whole-note promotion + a queryable provenance sidecar
+### 3.2 · Whole notes, verbatim, with provenance on the memory
 
-Curated notes are stored **verbatim** as one memory (`extract_memories=False`) — no
-chunk-and-reinterpret. Alongside the SDK's `CITY_MEMORY`, a `HARNESS_MEMORY_META`
-sidecar records **source path, content revision, and `superseded_by`** as plain
-SQL you can query. Promotion is **idempotent per path**: a note promoted again
-replaces its prior memory rather than piling up duplicates.
+The SDK's built-in extraction prompt asks for small *atomic* facts — the
+chunk-and-reinterpret the review warned about. Our instructions override it for the
+inbox thread: a kept note becomes **exactly one** `memory` record, **word for word**.
+§5 checks that rather than trusting it, so an SDK change that stops honouring the
+override fails loudly.
 
-### 3.3 · Supersession: new facts retire old ones
+Provenance needs no table of ours. Each note is posted with `metadata={source_path,
+revision, days_ago}`, and `memory_extraction_inherit_message_metadata` copies those keys
+onto the memory. `list_memories(metadata_filter={"source_path": ...})` finds every memory
+a note produced, and recall reads the observation's real age for recency weighting.
+
+Re-runs are the one thing the store does not handle for us: it treats a re-posted note as
+a new claim, not a duplicate, and keeps it as a fresh valid memory beside the old one. So
+promotion is **idempotent per path** — it deletes what an earlier promotion of the same
+path left before posting again.
+
+### 3.3 · Supersession: the store's link step retires old facts
 
 ```mermaid
 flowchart LR
-  rep["repair note<br/>(pier 2 recoated)"] --> pn["promote_note"]
-  pn --> sr["search similar memories"]
-  sr --> def["defect memory<br/>(pier 2 corroded)"]
-  pn --> jd{"LLM: does repair<br/>make defect obsolete?"}
-  jd -->|yes| mk["sidecar:<br/>defect.superseded_by = repair"]
-  mk --> rc["recall() drops superseded<br/>+ recency-weights the rest"]
+  rep["repair note<br/>(pier 2 recoated)"] --> pn["promote_note → add_messages"]
+  pn --> ex["extraction keeps it<br/>as one memory"]
+  ex --> lk{"link step (our link instructions):<br/>does it replace an existing memory?"}
+  lk -->|supersedes| st["defect.status → invalid<br/>(CITY_MEMORY_LINK)"]
+  st --> q1["search(include_invalid_results=False,<br/>record_types=['memory']) → current belief"]
+  st --> q2["search(num_hops=1)<br/>→ history, through the link"]
+  st --> un["delete_record_link<br/>→ trigger revalidates"]
 ```
 
-Recall runs the SDK relevance search, joins the sidecar to **drop superseded
-memories and attach provenance**, then recency-weights what remains
-(`rerank_by_recency`, a half-life decay) so the present outranks the stale past.
+Nothing of ours decides supersession: the extraction call's link step compares each new
+memory with the asset's existing ones and writes the relation. `supersedes`, `refines` and
+`duplicates` flip their target to `invalid` (stored, hidden from current recall);
+`contradicts` and `supports` leave both memories current. Recall must also pass
+`record_types=["memory"]` — the thread's raw messages are searchable too, and messages are
+never invalidated.
 
-### 3.3b · The same supersession, as a first-class relation (§7c)
+### 3.3b · The relation itself (§7c)
 
-All of §3.3 is hand-rolled because the SDK had no notion of a relation. Oracle
-Agent Memory **26.8** added one, so §7c does the same job through the platform:
-
-```mermaid
-flowchart LR
-  lk["link_records(repair, defect,<br/>'supersedes')"] --> st["defect.status -> invalid<br/>(managed CITY_MEMORY_LINK)"]
-  st --> q1["search(include_invalid_results=False)<br/>-> current belief only"]
-  st --> q2["search(num_hops=1)<br/>-> history, through the link"]
-  st --> un["delete_record_link<br/>-> trigger revalidates"]
-```
-
-Two things are worth taking from the contrast. The **sidecar can only hide** a
-superseded memory; a relation is traversable, so one store answers both *what is
-true now?* and *what did we believe before, and what changed it?* And the SDK
-**records** a relation, it does not **judge** one — deciding that a repair
-completes a defect is still the §3.3 model call. Graph memory replaces the
-bookkeeping, not the judgement.
+§7c looks at the relation the store wrote as **data**: one hop from the superseded memory
+reaches what replaced it (*what did we believe before, and what changed it?*), deleting the
+link revalidates the old memory, and `link_records` asserts a relation the store missed.
+The store does the bookkeeping and the judging; we write the policy — the gate, the
+curation and link instructions, the provenance keys — and check it.
 
 This is also where the `CREATE TRIGGER` prerequisite comes from: the managed v13
 schema carries a delete trigger on the link table that returns an invalidated
@@ -450,7 +455,7 @@ notebooks addressed.
 
 ```mermaid
 flowchart LR
-  E1["1 · Promotion precision"] --> M1["nb02 triage gate"]
+  E1["1 · Promotion precision"] --> M1["nb02 curation gate"]
   E2["2 · Skill fidelity"] --> M2["nb01 distillation + faithfulness"]
   E3["3 · Skills-help"] --> M3["nb01 — does learning help?"]
   E4["4 · Card fidelity"] --> M4["nb03 compaction over a horizon"]
@@ -469,7 +474,10 @@ flowchart LR
   agg --> tbl[("HARNESS_EVAL")]
 ```
 
-- **Promotion precision** — precision/recall of the triage gate on a signal+junk corpus.
+- **Promotion precision** — precision/recall of nb02's real gate (path rule + the store's
+  extraction under `promote.CURATION_INSTRUCTIONS`) on a signal+junk corpus, plus a check
+  that every kept note became exactly one verbatim memory. Runs in a sandbox user
+  (`_eval_promotion`) emptied before and after.
 - **Skill fidelity** — an LLM judge scores distilled skills, with a **tampered
   control** proving the judge isn't a rubber stamp.
 - **Skills-help** — the review's missing experiment: the agent *with* vs *without*
@@ -517,9 +525,10 @@ exist would violate principle #5.
 | nb01 | not re-runnable — `promoted='Y'` never reset, 2nd run fails at harvest | **fixed** — learned state resets at the registry DDL cell |
 | nb04 | eval 5 crashed (`round(None)`) on the card-lost-a-fact case it exists to catch | **fixed** — reported `n/a (0 correct)`, drawn as no bar |
 | nb04 | eval 3 passed vacuously on `0 ≥ 0` — didn't enforce "skills help" | **fixed** — both arms must be fully scored and one must succeed |
-| nb02 | recency recall inert — sidecar never stores `days_ago` | identified |
+| nb02 | recency recall inert — sidecar never stores `days_ago` | **fixed** — `days_ago` travels as memory metadata (sidecar removed 2026-10-19) |
 | nb03 | `fact_status` matches model-invented ids (tests coincidence, not retention) | identified |
-| nb02 | `hold` notes are never re-triaged (stranded) | identified |
+| nb02 | `hold` notes are never re-triaged (stranded) | **moot** — `hold` removed with the triage LLM; incomplete notes are not kept |
+| nb04 | eval 1 scores its own copy of a keep/discard LLM, not nb02's gate (now the SDK's extraction) | **fixed** 2026-10-19 — eval 1 runs the store's extraction under the shared `promote.CURATION_INSTRUCTIONS`; live: precision 1.00, recall 1.00, all kept notes verbatim |
 | nb00 | Langfuse check is a false-green — `flush()` never raises, no `auth_check` | identified |
 | nb01 | no skill-staleness signal at all: `schema_sha` was cut as the wrong layer, and its `tools_sha` replacement is designed but not built | deferred |
 
