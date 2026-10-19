@@ -23,7 +23,8 @@ Strength-based card consolidation — once the only deferred item — was built
 2026-07-25 (notebook 03 §4b).
 
 Live-verification currency, which drifts as notebooks change: nb03 re-verified
-2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 2026-08-13,
+2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 **2026-10-19: 0 cell errors, 30 green
+checks** (`LANGFUSE_MODE=off`),
 nb02 **2026-10-08 on 26.8 / schema v13: 0 cell errors, 39 green checks**
 (`LANGFUSE_MODE=off`), §7c included, nb00 2026-07-25. That nb03 pass is the first since the
 2026-08-10 `merge_card` strength fix and confirms §4b live: the facts list grows

@@ -67,3 +67,22 @@ def test_parse_tolerates_dashes_inside_values():
         source_workflow_id="w",
     )
     assert parse_skill_md(text)["description"] == "triage --- with dashes"
+
+
+def test_truncate_result_lists_ids_in_the_cut_part():
+    ids = r"\b[0-9a-f]{8}-[0-9a-f]{3}\b"
+    value = "aaaaaaaa-111 " + "x" * 300 + " bbbbbbbb-222 aaaaaaaa-111 cccccccc-333"
+    out = truncate_result(value, 100, keep=ids)
+    assert "ids in the cut part: bbbbbbbb-222, cccccccc-333" in out
+    assert out.count("aaaaaaaa-111") == 1  # already visible in the head
+
+
+def test_truncate_result_lists_id_split_by_the_cut():
+    ids = r"\b[0-9a-f]{8}-[0-9a-f]{3}\b"
+    out = truncate_result("x" * 95 + " dddddddd-444 " + "y" * 50, 100, keep=ids)
+    assert "ids in the cut part: dddddddd-444" in out
+
+
+def test_truncate_result_without_keep_lists_nothing():
+    out = truncate_result("x" * 200 + " eeeeeeee-555", 100)
+    assert "ids in the cut part" not in out

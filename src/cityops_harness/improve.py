@@ -7,6 +7,7 @@ database or an LLM. The notebook supplies the SQL and model calls.
 from __future__ import annotations
 
 import json
+import re
 
 _SKILL_TEMPLATE = """---
 name: {name}
@@ -68,19 +69,36 @@ def parse_skill_md(text: str) -> dict:
     return meta
 
 
-def truncate_result(value: str, max_chars: int = 300) -> str:
+def truncate_result(value: str, max_chars: int = 300, keep: str | None = None) -> str:
+    """Cut `value` to `max_chars`, noting how much was dropped.
+
+    `keep` is a regex for identifiers a reader must not lose (e.g. finding ids):
+    any match not wholly inside the kept head is listed in the marker, so a judge
+    reading the short form still sees every record the full result returned.
+    """
     value = str(value)
     if len(value) <= max_chars:
         return value
-    return f"{value[:max_chars]} ...[truncated {len(value) - max_chars} chars]"
+    head = value[:max_chars]
+    note = f"truncated {len(value) - max_chars} chars"
+    if keep is not None:
+        elided = [m.group() for m in re.finditer(keep, value) if m.end() > max_chars]
+        elided = [m for m in dict.fromkeys(elided) if m not in head]
+        if elided:
+            note += "; ids in the cut part: " + ", ".join(elided)
+    return f"{head} ...[{note}]"
 
 
-def trajectory_to_text(steps: list[dict], max_result_chars: int = 300) -> str:
+def trajectory_to_text(
+    steps: list[dict], max_result_chars: int = 300, keep: str | None = None
+) -> str:
+    """Render a trajectory for a model to read. This is the one place results are
+    truncated: trajectories store raw results, so rendering twice cannot compound."""
     lines = []
     for i, step in enumerate(steps, start=1):
         lines.append(f"Step {i}: {step['tool']}")
         lines.append(f"  args: {json.dumps(step['args'], default=str)}")
-        lines.append(f"  result: {truncate_result(step['result'], max_result_chars)}")
+        lines.append(f"  result: {truncate_result(step['result'], max_result_chars, keep)}")
     return "\n".join(lines)
 
 
