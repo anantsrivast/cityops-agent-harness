@@ -25,11 +25,9 @@ Strength-based card consolidation — once the only deferred item — was built
 Live-verification currency, which drifts as notebooks change: nb03 re-verified
 2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 **2026-10-19: 0 cell errors, 30 green
 checks** (`LANGFUSE_MODE=off`),
-nb02 **2026-10-19 (evening, after the no-scheduling / no-§2b / merged-§5 restructure):
-0 cell errors, 32 green checks** (`LANGFUSE_MODE=off`, 37 cells), briefing cited 7/7
-memories. Two tiny edits landed after that pass without a re-run: §5 forgets the
-repair path's stale memory before writing the note, §7's second client drops the
-deprecated `extract_memories=False`; nb00 2026-07-25. That nb03 pass is the first since the
+nb02 **2026-10-19 (final, with the §2 clean-slate reset): 0 cell errors, 32 green
+checks** (`LANGFUSE_MODE=off`, 37 cells); reset cleared 12 stale memories, recall and the
+briefing then showed only this run's pier-2 notes; nb00 2026-07-25. That nb03 pass is the first since the
 2026-08-10 `merge_card` strength fix and confirms §4b live: the facts list grows
 to 10 then *shrinks* to 6 as gist absorbs 4 evicted facts, holding ~4.2k against
 the 4000-char ceiling while the additive card runs to 14.7k, with no planted fact
