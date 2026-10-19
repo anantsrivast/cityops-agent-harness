@@ -148,13 +148,13 @@ iterates **model → tool calls → results → model** until the model stops ca
 tools, re-binding the toolset each turn. Every step is recorded:
 
 ```python
-trajectory.append({"tool": tc["name"], "args": tc["args"],
-                   "result": improve.truncate_result(result)})   # ordered, with args + result
+trajectory.append({"tool": tc["name"], "args": tc["args"], "result": result})   # ordered, full result
 ```
 
 This is the review fix that everything downstream depends on: the original
 harness stored a *sorted set of tool names* — nothing to distil from. Here you get
-the **ordered tool calls, their arguments, and truncated results**. A tool error
+the **ordered tool calls, their arguments, and full results**. Results are shortened
+only when a model reads the trajectory (`improve.trajectory_to_text`), once. A tool error
 becomes `ERROR: …` text in the message (not a crash), so the model can recover and
 the failure stays visible in the trajectory.
 
@@ -327,17 +327,7 @@ whether a stale skill actually does harm, before adding machinery to label it.
 Today a skill's only freshness signal is its own track record: two failures
 retire it.
 
-### 3.7 · The producer (§8b): the copilot writes memory
-
-The closing section connects notebook 01 to notebook 02. The copilot gets a
-`remember(asset_id, note, durable)` tool and files durable findings for notebook
-02's pipeline to curate. The design choice: **the agent is never told about
-directories.** It judges only "is this worth keeping?"; the *tool* files
-`durable=True` into `/inbox` (notebook 02's opt-in area) and `durable=False` into
-`/work` (scratch). Placement is policy the tool owns; the agent supplies
-judgement.
-
-### 3.8 · A real captured workflow row (worked example)
+### 3.7 · A real captured workflow row (worked example)
 
 Abstract descriptions only go so far — here is an actual `HARNESS_WORKFLOW` row
 the harness captured during a run, so you can see what `intent`, `steps`, and the
@@ -358,7 +348,7 @@ intent      = "Inspect Harbor Bridge: heavy corrosion on the bearing plates at p
   { "tool": "tool_find_similar_findings",                 # STEP 1 — search history FIRST
     "args": { "description": "surface corrosion staining under deck drainage outlets...",
               "asset_id": "Riverside Pedestrian Bridge", "k": 5 },
-    "result": '[{"finding_id": "6bbddab7-3a1", "severity": "medium", ...}, ...]'   # priors (truncated to 300 chars)
+    "result": '[{"finding_id": "6bbddab7-3a1", "severity": "medium", ...}, ...]'   # priors (stored in full)
   },
   { "tool": "tool_log_finding",                           # STEP 2 — record the new finding
     "args": { "asset_id": "Riverside Pedestrian Bridge", "category": "corrosion",
@@ -376,7 +366,7 @@ intent      = "Inspect Harbor Bridge: heavy corrosion on the bearing plates at p
 ```
 Step 1: tool_find_similar_findings
   args: {"description": "surface corrosion staining...", "asset_id": "Riverside Pedestrian Bridge", "k": 5}
-  result: [{"finding_id": "6bbddab7-3a1", "severity": "medium", ...}] ...[truncated]
+  result: [{"finding_id": "6bbddab7-3a1", "severity": "medium", ...}] ...[truncated 1834 chars; ids in the cut part: ...]
 Step 2: tool_log_finding
   args: {"asset_id": "Riverside Pedestrian Bridge", "category": "corrosion", "severity": "medium", "description": "..."}
   result: 78b69385-124
@@ -434,7 +424,6 @@ showed a leftover skill instead of "none."
 | 7 Harvester | `harvest_ready`, `promote_workflow_to_skill`, `harvest`, `build_skill_manifest`, `update_skill_outcomes` | distil + lifecycle (3.5, 3.6) |
 | **7c Anatomy** | *(reuses all of the above)* | one `run_and_learn` in slow motion |
 | 8 The arc | `run_and_learn` ×5, `harvest` | recur → verify → harvest → approve |
-| 8b Producer | `remember` | the copilot as a memory producer (3.7) |
 
 **Why the generator looks unreadable:** you edit `tools/make_01_notebook.py`,
 which is the notebook *emitted as escaped Python strings* (so the `complete` and

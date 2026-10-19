@@ -152,12 +152,12 @@ sequenceDiagram
     Tools->>DB: read / write
     DB-->>Tools: result
     Tools-->>Agent: full result
-    Note right of Agent: trajectory += {tool, args, truncated result}
+    Note right of Agent: trajectory += {tool, args, full result}
   end
   Agent-->>Task: final summary
 ```
 
-Every step records the **tool, its arguments, and a truncated result, in order** —
+Every step records the **tool, its arguments, and its full result, in order** —
 the record the judge audits and skills distill from. A tool error becomes `ERROR:`
 text in the message, not a crash, so the model can recover *and* the failure stays
 visible in the trajectory.
@@ -236,15 +236,6 @@ schema fingerprint was cut for fingerprinting the wrong layer (skills contain no
 SQL — they are procedures over tools), and the `tools_sha` that should replace it
 is designed but unbuilt. See §7.
 
-### 2.6 · Closing the loop: the copilot as a producer (§8b)
-
-The final section connects Path 2 to Path 1. The copilot gets a `remember(asset_id,
-note, durable)` tool and files durable findings for notebook 02 to curate. The
-design choice worth internalizing: **the agent is never told about directories.**
-It judges only *"is this worth keeping?"*; the tool files `durable=True` into
-`/inbox` (notebook 02's opt-in area) and `durable=False` into `/work` (scratch).
-Placement is policy the tool owns; the agent supplies judgement.
-
 ---
 
 > **Going deeper on notebook 01?** [docs/notebook-01-explained.md](notebook-01-explained.md) is a full mechanism-by-mechanism reference — the judge's two layers, gray-band dedup, the skill lifecycle, structured output, and a FAQ.
@@ -272,6 +263,17 @@ flowchart LR
   TG -->|hold| HH["status H"]
   DR --> HC["queue_health → ok / warn / stalled"]
 ```
+
+### 3.0 · Where notes come from: the copilot as a producer (§2b)
+
+Before the pipeline runs, the copilot itself files notes. It gets a `remember(asset_id,
+note, durable)` tool and one read-only search tool. The design choice worth
+internalizing: **the agent is never told about directories.** It judges only *"is this
+worth keeping?"*; the tool files `durable=True` into `/inbox` (the opt-in area) and
+`durable=False` into `/work` (scratch). Placement is policy the tool owns; the agent
+supplies judgement. Its notes then go through the same staging and triage as the
+hand-seeded ones. (This section lived in notebook 01 as §8b until 2026-10-19; it moved
+here because notes are notebook 02's kind of memory, not notebook 01's.)
 
 ### 3.1 · Two gates, cheap before expensive
 

@@ -252,6 +252,136 @@ SCRATCH = [
 ]
 
 # --------------------------------------------------------------------------
+# Section: the copilot as a memory producer (moved from notebook 01 §8b)
+# --------------------------------------------------------------------------
+PRODUCER = [
+    md(
+        "## 2b · Where inbox notes really come from: the copilot as a *producer*\n\n"
+        "The seed above is hand-written. In production the notes come from the copilot\n"
+        "itself, deciding what is worth remembering while it works.\n\n"
+        "The design choice worth noticing: the agent is **never told about directories**. It\n"
+        "gets one `remember(asset_id, note, durable)` tool and judges only *is this worth\n"
+        "keeping?*. The **tool** owns the convention - `durable=True` files to `/inbox` (the\n"
+        "opt-in area this notebook promotes from), `durable=False` to `/work` (scratch, never\n"
+        "promoted). Placement is policy; the agent only supplies judgement."
+    ),
+    md(
+        "**The `remember` tool, plus one read tool.** `remember` writes through the same\n"
+        "`write_note` as the seed, so an agent-filed note enters exactly the pipeline the\n"
+        "seeded ones do. The path is derived, never chosen by the model.\n"
+        "`tool_find_similar_findings` is a read-only copy of notebook 01's search, so the\n"
+        "copilot has real history to judge against."
+    ),
+    code(
+        "import re\n"
+        "from langchain_core.tools import tool\n"
+        "\n"
+        "\n"
+        "def _slug(text):\n"
+        "    return re.sub(r\"[^a-z0-9]+\", \"-\", text.lower()).strip(\"-\")[:40] or \"note\"\n"
+        "\n"
+        "\n"
+        "@tool\n"
+        "def remember(asset_id: str, note: str, durable: bool) -> str:\n"
+        "    \"\"\"File a note for long-term memory curation.\n"
+        "    durable=True  -> a completed, keep-worthy finding (enters the promotion inbox).\n"
+        "    durable=False -> scratch reasoning or a dead end (kept OUT of long-term memory).\n"
+        "    Returns the path it was filed under. You never choose the path.\"\"\"\n"
+        "    path = f\"/inbox/{asset_id}/{_slug(note)}.md\" if durable else f\"/work/{_slug(note)}.md\"\n"
+        "    write_note(path, note)\n"
+        "    return path\n"
+        "\n"
+        "\n"
+        "@tool\n"
+        "def tool_find_similar_findings(description: str, asset_id: str = None, k: int = 3) -> str:\n"
+        "    \"\"\"Search past inspection findings semantically similar to a description.\n"
+        "    Returns finding_id, category, severity, days_ago and description per hit.\"\"\"\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(f\"\"\"SELECT finding_id, category, severity, days_ago, description\n"
+        "                         FROM CITY_INSPECTION_FINDING\n"
+        "                        WHERE (:a IS NULL OR asset_id = :a)\n"
+        "                        ORDER BY VECTOR_DISTANCE(embedding,\n"
+        "                                 VECTOR_EMBEDDING({settings.embed_model} USING :q AS data),\n"
+        "                                 COSINE)\n"
+        "                        FETCH FIRST :k ROWS ONLY\"\"\", a=asset_id, q=description, k=k)\n"
+        "        cols = [d[0].lower() for d in cur.description]\n"
+        "        hits = []\n"
+        "        for r in cur.fetchall():\n"
+        "            row = dict(zip(cols, r))\n"
+        "            if hasattr(row[\"description\"], \"read\"):\n"
+        "                row[\"description\"] = row[\"description\"].read()\n"
+        "            hits.append(row)\n"
+        "    return json.dumps(hits, default=str)\n"
+        "\n"
+        "ok(\"remember() ready - the tool owns placement; the agent only judges durable vs not\")"
+    ),
+    md(
+        "**Run the producer.** The copilot gets the search tool *plus* `remember`, and a prompt\n"
+        "that asks it to keep durable findings and discard scratch - in those words, not in\n"
+        "directory names. Watch the `remember(... durable=True/False ...)` calls: the model\n"
+        "decides worth, the tool decides where.\n\n"
+        "The task is about the expansion-joint anchor bolts on purpose: the pier-2 bearing\n"
+        "notes seeded above are the supersession demo in Section 4, and an agent note on the\n"
+        "same defect would compete with them."
+    ),
+    code(
+        "from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage\n"
+        "\n"
+        "PRODUCER_PROMPT = (\n"
+        "    \"You are the CityOps inspection copilot, now also responsible for what gets\\n\"\n"
+        "    \"remembered. Do the task through your tools. Before you finish, call remember():\\n\"\n"
+        "    \"  - durable=True for each completed, keep-worthy finding (one short paragraph);\\n\"\n"
+        "    \"  - durable=False for scratch reasoning or a dead end you do NOT want kept.\\n\"\n"
+        "    \"You never choose folders or paths - remember() files each note where it belongs.\"\n"
+        ")\n"
+        "\n"
+        "PRODUCER_TOOLS = {t.name: t for t in (tool_find_similar_findings, remember)}\n"
+        "_pmodel = CHAT.bind_tools(list(PRODUCER_TOOLS.values()))\n"
+        "_cfg = {\"callbacks\": [HANDLER]} if HANDLER else {}\n"
+        "task = (f\"Inspect the expansion-joint anchor bolts on {ASSET_A} for pitting: check\"\n"
+        "        f\" similar past findings first, remember what matters, and explicitly discard\"\n"
+        "        f\" your scratch reasoning.\")\n"
+        "msgs = [SystemMessage(content=PRODUCER_PROMPT), HumanMessage(content=task)]\n"
+        "\n"
+        "FILED = []   # (durable, path) for every remember() call THIS run made\n"
+        "for _ in range(6):\n"
+        "    resp = _pmodel.invoke(msgs, config=_cfg)\n"
+        "    msgs.append(resp)\n"
+        "    if not getattr(resp, \"tool_calls\", None):\n"
+        "        break\n"
+        "    for tc in resp.tool_calls:\n"
+        "        try:\n"
+        "            result = str(PRODUCER_TOOLS[tc[\"name\"]].invoke(tc[\"args\"], _cfg))\n"
+        "        except Exception as e:\n"
+        "            result = f\"ERROR: {type(e).__name__}: {e}\"\n"
+        "        if tc[\"name\"] == \"remember\":\n"
+        "            FILED.append((bool(tc[\"args\"].get(\"durable\")), result))\n"
+        "            print(f\"  remember(durable={tc['args'].get('durable')}) -> {result}\")\n"
+        "        else:\n"
+        "            print(f\"  {tc['name']}(...) = {result[:60]}\")\n"
+        "        msgs.append(ToolMessage(content=result, tool_call_id=tc[\"id\"]))\n"
+        "\n"
+        "_ans = resp.content if isinstance(resp.content, str) else \"\".join(\n"
+        "    p.get(\"text\", \"\") if isinstance(p, dict) else str(p) for p in resp.content)\n"
+        "print(\"\\nagent:\", _ans.strip()[:280])"
+    ),
+    md(
+        "**What the agent filed.** Checked against *this run's* `remember` calls, not the\n"
+        "whole table - leftover notes from an earlier run must not be able to pass it."
+    ),
+    code(
+        "for durable, path in FILED:\n"
+        "    print(f\"  {'durable' if durable else 'scratch':8} {read_note(path)['status']}  {path}\")\n"
+        "\n"
+        "_kept = [p for d, p in FILED if d]\n"
+        "check(bool(_kept), f\"the copilot filed {len(_kept)} durable note(s) into the inbox\")\n"
+        "check(all(promote.triage_allowed(p) == d for d, p in FILED),\n"
+        "      \"every durable note landed in /inbox, and every scratch note outside it\")\n"
+        "ok(\"producer wired - the pipeline below stages and triages these notes with the seed\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
 # Section: the triage gate
 # --------------------------------------------------------------------------
 TRIAGE = [
@@ -1061,7 +1191,7 @@ CLOSING = [
     ),
 ]
 
-SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, TRIAGE, PROMOTION,
+SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, PRODUCER, TRIAGE, PROMOTION,
             PIPELINE, BRIEFING, RECALL, TRACE, RELATIONS, CONTINUITY, CLOSING]
 
 
