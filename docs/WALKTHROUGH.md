@@ -28,7 +28,7 @@ memory. Each notebook fixes one path and then measures it.
 flowchart LR
   CP["CityOps Copilot<br/>(prerequisite)"] --> N0["00 · Setup"]
   N0 --> N1["01 · Self-improving copilot<br/><b>Path 2: procedures → skills</b>"]
-  N1 --> N2["02 · Scheduled briefings<br/><b>Path 1: scratch → long-term</b>"]
+  N1 --> N2["02 · Curated long-term memory<br/><b>Path 1: scratch → long-term</b>"]
   N2 --> N3["03 · Context engineering<br/><b>what the window holds</b>"]
   N3 --> N4["04 · Evals<br/><b>prove all of the above</b>"]
 ```
@@ -240,13 +240,14 @@ is designed but unbuilt. See §7.
 
 > **Going deeper on notebook 01?** [docs/notebook-01-explained.md](notebook-01-explained.md) is a full mechanism-by-mechanism reference — the judge's two layers, gray-band dedup, the skill lifecycle, structured output, and a FAQ.
 
-## 3 · Notebook 02 — Scheduled briefings (Path 1)
+## 3 · Notebook 02 — Curated long-term memory (Path 1)
 
 **Why:** the review's Path-1 verdict — *"everything graduates within the hour, 200-
 word chunks get re-extracted into confident misreadings, nothing has provenance,
 nothing is forgotten, and the consumer is never actually scheduled."* This notebook
-rebuilds scratch→long-term promotion as a **curated, provenanced** step, and ends in a
-**scheduled** morning briefing the database builds on its own.
+rebuilds scratch→long-term promotion as a **curated, provenanced** step with real
+supersession, and ends in a morning briefing built only from **current** memory.
+Scheduling is deliberately out of scope: it is orchestration, not memory.
 
 The scratch store is a small filesystem-in-a-table: each note is a row with a
 **path** (a policy label), content, and a status.
@@ -333,9 +334,9 @@ memory with the asset's existing ones and writes the relation. `supersedes`, `re
 `record_types=["memory"]` — the thread's raw messages are searchable too, and messages are
 never invalidated.
 
-### 3.3b · The relation itself (§6c)
+### 3.3b · The relation itself (§5c)
 
-§6c looks at the relation the store wrote as **data**: one hop from the superseded memory
+§5c looks at the relation the store wrote as **data**: one hop from the superseded memory
 reaches what replaced it (*what did we believe before, and what changed it?*), deleting the
 link revalidates the old memory, and `link_records` asserts a relation the store missed.
 The store does the bookkeeping and the judging; we write the policy — the gate, the
@@ -345,13 +346,17 @@ This is also where the `CREATE TRIGGER` prerequisite comes from: the managed v13
 schema carries a delete trigger on the link table that returns an invalidated
 memory to `valid` when its invalidating relation goes away.
 
-### 3.4 · The scheduled briefing
+### 3.4 · The briefing, built from current memory (§6)
 
-Promotion is one `promote_note` call per note, made wherever notes are written; the
-notebook does not teach queueing or orchestration, which are not memory concerns. What
-*is* scheduled is the payoff: `HARNESS_BRIEFING_JOB` builds a daily **morning
-briefing** inside the database. The database computes the numbers (no LLM in the loop,
-so it can't hallucinate a figure) and the model only narrates them.
+The payoff reads the asset's **valid** memories through the SDK — the superseded defect is
+already `invalid`, so it is not reported as open — plus a few finding counts from SQL. The
+model only narrates that input and cites each memory's `source_path`, so every claim traces
+back to a note. The briefing is saved as a scratch note under `/briefings/` (outside the
+inbox, so it is never promoted), which is what §7's fresh session resumes from.
+
+The copilot's `remember` tool also owns the **asset id**: a model-supplied `harbor_bridge`
+resolves to `Harbor Bridge`, and an unknown asset is refused. Before that, an agent note
+could land in a different memory user, where neither supersession nor this briefing saw it.
 
 ---
 

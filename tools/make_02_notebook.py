@@ -20,8 +20,7 @@ def code(src):
 # --------------------------------------------------------------------------
 INTRO = [
     md(
-        "# 02 - Scheduled Briefings: promotion that curates, remembers where it came\n"
-        "from, and runs without you\n\n"
+        "# 02 - Curated long-term memory: promotion, provenance, supersession\n\n"
         "Notebook 01 fixed how the harness learns *procedures*. This notebook fixes the\n"
         "other promotion path - scratch notes graduating into long-term memory - which the\n"
         "review summarised as *\"promotion without curation, growth without forgetting\"*:\n\n"
@@ -31,8 +30,8 @@ INTRO = [
         "| 200-word chunks re-extracted by the LLM | **Whole-note memories**, verbatim - instructed, then *checked* |\n"
         "| No provenance, nothing supersedes | Provenance as **memory metadata**; supersession as the store's own **relations** |\n"
         "| (bonus) persistence-of-one-fact only | **Continuity of work**: a new session resumes the briefing *plan*, not just facts |\n\n"
-        "The payoff: a **morning asset-risk briefing** the database assembles on schedule -\n"
-        "the LLM narrates the numbers; it never invents them."
+        "The payoff: a **morning asset-risk briefing** built from *current* memory - every\n"
+        "claim traceable to the note it came from, and nothing the repairs have retired."
     ),
 ]
 
@@ -62,18 +61,17 @@ SETUP = [
         "ok(f\"connected - provider={settings.llm_provider}, langfuse={settings.langfuse_mode}\")"
     ),
     code(
-        "# Three privileges most ADB users lack by default. CREATE PROCEDURE and CREATE JOB\n"
-        "# are for the scheduled briefing (Section 5). CREATE TRIGGER is for the memory\n"
-        "# store itself: Agent Memory 26.8 raised its managed schema to v13, which adds a\n"
+        "# One privilege most ADB users lack by default: CREATE TRIGGER, for the memory\n"
+        "# store itself. Agent Memory 26.8 raised its managed schema to v13, which adds a\n"
         "# <PREFIX>MEMORY_LINK table plus a delete trigger that revalidates memories when\n"
-        "# an invalidating link is removed (Section 6c).\n"
+        "# an invalidating link is removed (Section 5c).\n"
         "#\n"
         "# This gate runs BEFORE the store is opened, and on purpose. The v12 -> v13\n"
         "# upgrade is not atomic: it retypes MESSAGE.CONTENT from CLOB to JSON and only\n"
         "# then creates the trigger. Without the grant it fails there, leaving the store\n"
         "# stamped v12 but carrying a v13 column - unreadable by old and new SDK alike.\n"
         "# Better to stop here with a grant to run than to half-migrate a live store.\n"
-        "REQUIRED_PRIVS = {\"CREATE PROCEDURE\", \"CREATE JOB\", \"CREATE TRIGGER\"}\n"
+        "REQUIRED_PRIVS = {\"CREATE TRIGGER\"}\n"
         "with conn.cursor() as cur:\n"
         "    cur.execute(\"SELECT privilege FROM user_sys_privs\")\n"
         "    _privs = {r[0] for r in cur.fetchall()}\n"
@@ -81,7 +79,21 @@ SETUP = [
         "check(not _missing,\n"
         "      \"missing privilege(s) - run as ADMIN, then re-run this cell: \"\n"
         "      + \"; \".join(f'GRANT {p} TO {settings.db_user}' for p in sorted(_missing))\n"
-        "      if _missing else f\"privileges present ({\", \".join(sorted(REQUIRED_PRIVS))})\")"
+        "      if _missing else f\"privileges present ({\", \".join(sorted(REQUIRED_PRIVS))})\")\n"
+        "\n"
+        "# Earlier versions of this notebook scheduled a promotion queue and an in-database\n"
+        "# briefing job. Retire them if present, so nothing runs behind the notebook's back.\n"
+        "with conn.cursor() as cur:\n"
+        "    for _ddl in (\"BEGIN DBMS_SCHEDULER.DROP_JOB('HARNESS_STAGE_JOB'); END;\",\n"
+        "                 \"BEGIN DBMS_SCHEDULER.DROP_JOB('HARNESS_BRIEFING_JOB'); END;\",\n"
+        "                 \"DROP PROCEDURE HARNESS_STAGE_INBOX\",\n"
+        "                 \"DROP PROCEDURE HARNESS_BUILD_BRIEFING\",\n"
+        "                 \"DROP TABLE HARNESS_PROMOTION_QUEUE PURGE\",\n"
+        "                 \"DROP TABLE HARNESS_BRIEFING PURGE\"):\n"
+        "        try:\n"
+        "            cur.execute(_ddl)\n"
+        "        except Exception:\n"
+        "            pass  # not there - nothing to retire"
     ),
     code(
         "import asyncio\n"
@@ -268,7 +280,8 @@ PRODUCER = [
     md(
         "**The `remember` tool, plus one read tool.** `remember` writes through the same\n"
         "`write_note` as the seed, so an agent-filed note enters exactly the pipeline the\n"
-        "seeded ones do. The path is derived, never chosen by the model.\n"
+        "seeded ones do. The path is derived, never chosen by the model - and so is the asset\n"
+        "id: `harbor_bridge` resolves to `Harbor Bridge`, an unknown asset is refused.\n"
         "`tool_find_similar_findings` is a read-only copy of notebook 01's search, so the\n"
         "copilot has real history to judge against."
     ),
@@ -281,13 +294,32 @@ PRODUCER = [
         "    return re.sub(r\"[^a-z0-9]+\", \"-\", text.lower()).strip(\"-\")[:40] or \"note\"\n"
         "\n"
         "\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"SELECT DISTINCT asset_id FROM CITY_INSPECTION_FINDING\")\n"
+        "    KNOWN_ASSETS = {_slug(r[0]): r[0] for r in cur.fetchall()}\n"
+        "\n"
+        "\n"
+        "def canonical_asset(asset_id):\n"
+        "    \"\"\"The model may say 'harbor_bridge'; memory is keyed by 'Harbor Bridge'. A note\n"
+        "    filed under a variant would land in a different memory user, where supersession\n"
+        "    and recall never see it - so the tool resolves the id, or refuses.\"\"\"\n"
+        "    if asset_id is None:\n"
+        "        return None\n"
+        "    if _slug(asset_id) not in KNOWN_ASSETS:\n"
+        "        raise ValueError(f\"unknown asset {asset_id!r}; known: {sorted(KNOWN_ASSETS.values())}\")\n"
+        "    return KNOWN_ASSETS[_slug(asset_id)]\n"
+        "\n"
+        "\n"
         "@tool\n"
         "def remember(asset_id: str, note: str, durable: bool) -> str:\n"
         "    \"\"\"File a note for long-term memory curation.\n"
         "    durable=True  -> a completed, keep-worthy finding (enters the promotion inbox).\n"
         "    durable=False -> scratch reasoning or a dead end (kept OUT of long-term memory).\n"
         "    Returns the path it was filed under. You never choose the path.\"\"\"\n"
-        "    path = f\"/inbox/{asset_id}/{_slug(note)}.md\" if durable else f\"/work/{_slug(note)}.md\"\n"
+        "    if durable:\n"
+        "        path = f\"/inbox/{canonical_asset(asset_id)}/{_slug(note)}.md\"\n"
+        "    else:\n"
+        "        path = f\"/work/{_slug(note)}.md\"\n"
         "    write_note(path, note)\n"
         "    return path\n"
         "\n"
@@ -303,7 +335,8 @@ PRODUCER = [
         "                        ORDER BY VECTOR_DISTANCE(embedding,\n"
         "                                 VECTOR_EMBEDDING({settings.embed_model} USING :q AS data),\n"
         "                                 COSINE)\n"
-        "                        FETCH FIRST :k ROWS ONLY\"\"\", a=asset_id, q=description, k=k)\n"
+        "                        FETCH FIRST :k ROWS ONLY\"\"\",\n"
+        "                    a=canonical_asset(asset_id), q=description, k=k)\n"
         "        cols = [d[0].lower() for d in cur.description]\n"
         "        hits = []\n"
         "        for r in cur.fetchall():\n"
@@ -313,7 +346,7 @@ PRODUCER = [
         "            hits.append(row)\n"
         "    return json.dumps(hits, default=str)\n"
         "\n"
-        "ok(\"remember() ready - the tool owns placement; the agent only judges durable vs not\")"
+        "ok(\"remember() ready - the tool owns placement and the asset id; the agent only judges\")"
     ),
     md(
         "**Run the producer.** The copilot gets the search tool *plus* `remember`, and a prompt\n"
@@ -321,7 +354,7 @@ PRODUCER = [
         "directory names. Watch the `remember(... durable=True/False ...)` calls: the model\n"
         "decides worth, the tool decides where.\n\n"
         "The task is about the expansion-joint anchor bolts on purpose: the pier-2 bearing\n"
-        "notes seeded above are the supersession demo in Section 6, and an agent note on the\n"
+        "notes seeded above are the supersession demo in Section 5, and an agent note on the\n"
         "same defect would compete with them."
     ),
     code(
@@ -377,6 +410,8 @@ PRODUCER = [
         "check(bool(_kept), f\"the copilot filed {len(_kept)} durable note(s) into the inbox\")\n"
         "check(all(promote.triage_allowed(p) == d for d, p in FILED),\n"
         "      \"every durable note landed in /inbox, and every scratch note outside it\")\n"
+        "check(all(p.startswith(f\"/inbox/{ASSET_A}/\") for p in _kept),\n"
+        "      f\"every durable note is filed under the canonical asset id {ASSET_A!r}\")\n"
         "ok(\"producer wired - Section 4 promotes these notes along with the seed\")"
     ),
 ]
@@ -461,7 +496,7 @@ PROMOTION = [
         "No sidecar table.\n"
         "\n"
         "Then the store's link step compares the new memory with what the asset already has and\n"
-        "records any relation - a repair note `supersedes` the defect it fixed (Section 6).\n"
+        "records any relation - a repair note `supersedes` the defect it fixed (Section 5).\n"
         "\n"
         "One thing stays ours: **re-runs**. The store treats a re-posted note as a new claim, not\n"
         "a duplicate, so promotion first forgets whatever an earlier promotion of the same path\n"
@@ -521,27 +556,24 @@ PROMOTION = [
         "**Promote the inbox.** One `promote_note` call per new note - the seed, the copilot's\n"
         "notes from Section 2b, and the working files outside `/inbox` (which the gate drops\n"
         "without a model call). In production this runs wherever notes are written: right\n"
-        "after `remember()`, or from whatever scheduler you already run."
+        "after `remember()`, or from whatever scheduler you already run - orchestration is\n"
+        "not a memory concern, so this notebook does not teach it."
     ),
     code(
-        "# Earlier versions of this notebook staged notes through a queue and an hourly job.\n"
-        "# Retire them if present, so nothing else touches the scratchpad behind our back.\n"
-        "with conn.cursor() as cur:\n"
-        "    for _ddl in (\"BEGIN DBMS_SCHEDULER.DROP_JOB('HARNESS_STAGE_JOB'); END;\",\n"
-        "                 \"DROP PROCEDURE HARNESS_STAGE_INBOX\",\n"
-        "                 \"DROP TABLE HARNESS_PROMOTION_QUEUE PURGE\"):\n"
-        "        try:\n"
-        "            cur.execute(_ddl)\n"
-        "        except Exception:\n"
-        "            pass  # not there - nothing to retire\n"
+        "# This run's notes: the seed, the working files, and what the copilot filed in 2b.\n"
+        "# Leftovers from earlier runs are not ours to judge here.\n"
+        "_this_run = ([p for p, _c, _d in INBOX_SEED] + [SUPERSEDE_DEFECT_PATH]\n"
+        "             + [\"/work/draft_notes.md\", \"/work/attempt1_wrong.sql\",\n"
+        "                \"/tool_out/similar_dump.json\"]\n"
+        "             + [p for _d, p in FILED])\n"
+        "# Promote only the NEW ones, so re-running this cell settles nothing twice.\n"
+        "for p in _this_run:\n"
+        "    if read_note(p)[\"status\"] == \"N\":\n"
+        "        promote_note(p)\n"
+        "    _m = memories_from(p) if passes_gate(p) else []\n"
+        "    print(f\"  {read_note(p)['status']}  {p}\" + (f\"  -> memory {_m[0].id[:12]}...\" if _m else \"\"))\n"
         "\n"
-        "# Only NEW notes: a re-run must not re-promote what an earlier run already settled.\n"
-        "_new = [p for p, s in list_notes(\"/\") if s == \"N\"]\n"
-        "for p in _new:\n"
-        "    mid = promote_note(p)\n"
-        "    print(f\"  {read_note(p)['status']}  {p}\" + (f\"  -> memory {mid[:12]}...\" if mid else \"\"))\n"
-        "\n"
-        "_promoted = [p for p in _new if read_note(p)[\"status\"] == \"P\"]\n"
+        "_promoted = [p for p in _this_run if read_note(p)[\"status\"] == \"P\"]\n"
         "check(len(_promoted) >= 3, f\"{len(_promoted)} inbox notes promoted, each carrying its provenance\")\n"
         "# The override in Section 3 asked for one verbatim memory per note. Check it, don't trust it.\n"
         "_mems = {p: memories_from(p) for p in _promoted}\n"
@@ -553,128 +585,11 @@ PROMOTION = [
 ]
 
 # --------------------------------------------------------------------------
-# Section: the briefing automation
-# --------------------------------------------------------------------------
-BRIEFING = [
-    md(
-        "## 5 · The morning briefing: the database computes, the model narrates\n\n"
-        "`HARNESS_BUILD_BRIEFING` runs daily at 06:00 **inside the database** - it aggregates\n"
-        "recent findings and memory counts into a JSON payload with plain SQL.\n"
-        "No LLM in the loop, so it cannot hallucinate a number. The narrative layer runs when\n"
-        "a human reads the briefing - grounded, by instruction, in only the JSON's numbers."
-    ),
-    code(
-        "if not _table_exists(\"HARNESS_BRIEFING\"):\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"\"\"CREATE TABLE HARNESS_BRIEFING (\n"
-        "            briefing_id  VARCHAR2(64) PRIMARY KEY,\n"
-        "            generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
-        "            payload      CLOB NOT NULL,\n"
-        "            narrative    CLOB)\"\"\")\n"
-        "    conn.commit()\n"
-        "\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"\"\"CREATE OR REPLACE PROCEDURE HARNESS_BUILD_BRIEFING AS\n"
-        "      payload CLOB;\n"
-        "    BEGIN\n"
-        "      SELECT JSON_OBJECT(\n"
-        "        'generated_for' VALUE TO_CHAR(SYSDATE, 'YYYY-MM-DD'),\n"
-
-        "        -- current, provenanced memories. The one place SQL reads the store's own\n"
-        "        -- table: this job runs inside the database, where there is no SDK client.\n"
-        "        'curated_memories' VALUE (SELECT COUNT(*) FROM city_memory\n"
-        "                                   WHERE agent_id = 'CITY' AND status = 'valid'\n"
-        "                                     AND JSON_EXISTS(metadata, '$.source_path')),\n"
-        "        'recent_findings' VALUE (\n"
-        "            SELECT JSON_ARRAYAGG(JSON_OBJECT('asset' VALUE asset_id,\n"
-        "                                             'severity' VALUE severity,\n"
-        "                                             'cnt' VALUE n) RETURNING CLOB)\n"
-        "              FROM (SELECT asset_id, severity, COUNT(*) AS n\n"
-        "                      FROM city_inspection_finding\n"
-        "                     WHERE days_ago <= 30\n"
-        "                     GROUP BY asset_id, severity\n"
-        "                     ORDER BY n DESC FETCH FIRST 10 ROWS ONLY))\n"
-        "        RETURNING CLOB) INTO payload FROM dual;\n"
-        "      INSERT INTO harness_briefing (briefing_id, payload)\n"
-        "      VALUES (RAWTOHEX(SYS_GUID()), payload);\n"
-        "      COMMIT;\n"
-        "    END;\"\"\")\n"
-        "\n"
-        "def _replace_job(name, action, repeat, start_offset_minutes=1):\n"
-        "    with conn.cursor() as cur:\n"
-        "        try:\n"
-        "            cur.callproc(\"DBMS_SCHEDULER.DROP_JOB\", [name])\n"
-        "        except Exception:\n"
-        "            pass\n"
-        "        cur.execute(\"\"\"BEGIN\n"
-        "            DBMS_SCHEDULER.CREATE_JOB(\n"
-        "                job_name        => :name,\n"
-        "                job_type        => 'STORED_PROCEDURE',\n"
-        "                job_action      => :action,\n"
-        "                start_date      => SYSTIMESTAMP + NUMTODSINTERVAL(:offs, 'MINUTE'),\n"
-        "                repeat_interval => :rep,\n"
-        "                enabled         => TRUE);\n"
-        "        END;\"\"\", name=name, action=action, rep=repeat, offs=start_offset_minutes)\n"
-        "    conn.commit()\n"
-        "\n"
-        "\n"
-        "_replace_job(\"HARNESS_BRIEFING_JOB\", \"HARNESS_BUILD_BRIEFING\",\n"
-        "             \"FREQ=DAILY;BYHOUR=6;BYMINUTE=0\")\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.callproc(\"DBMS_SCHEDULER.RUN_JOB\", [\"HARNESS_BRIEFING_JOB\", True])\n"
-        "ok(\"briefing job scheduled daily at 06:00 - and fired once, now\")"
-    ),
-    code(
-        "def latest_briefing():\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"\"\"SELECT briefing_id, generated_at, payload, narrative\n"
-        "                         FROM HARNESS_BRIEFING ORDER BY generated_at DESC\n"
-        "                        FETCH FIRST 1 ROWS ONLY\"\"\")\n"
-        "        row = cur.fetchone()\n"
-        "    if row is None:\n"
-        "        return None\n"
-        "    payload = row[2].read() if hasattr(row[2], \"read\") else row[2]\n"
-        "    narrative = row[3].read() if row[3] is not None and hasattr(row[3], \"read\") else row[3]\n"
-        "    return {\"briefing_id\": row[0], \"generated_at\": row[1],\n"
-        "            \"payload\": json.loads(payload), \"narrative\": narrative}\n"
-        "\n"
-        "\n"
-        "def narrate_briefing():\n"
-        "    b = latest_briefing()\n"
-        "    # ✏️ TODO(3): the grounded narration - ask CHAT for a <=6-sentence morning\n"
-        "    #             briefing using ONLY numbers present in the JSON payload, then\n"
-        "    #             write the narrative back onto the briefing row.\n"
-        "    # TODO-SOLUTION-START\n"
-        "    cfg = {\"callbacks\": [HANDLER]} if HANDLER else {}\n"
-        "    resp = CHAT.invoke(\n"
-        "        \"Write a morning asset-risk briefing for a city operations chief.\\n\"\n"
-        "        \"HARD RULE: use ONLY facts and numbers present in this JSON - do not\\n\"\n"
-        "        \"estimate, extrapolate, or invent. <= 6 sentences, plain prose.\\n\\n\"\n"
-        "        + json.dumps(b[\"payload\"]), config=cfg)\n"
-        "    text = resp.content if isinstance(resp.content, str) else \"\".join(\n"
-        "        p.get(\"text\", \"\") if isinstance(p, dict) else str(p) for p in resp.content)\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"UPDATE HARNESS_BRIEFING SET narrative = :n WHERE briefing_id = :b\",\n"
-        "                    n=text, b=b[\"briefing_id\"])\n"
-        "    conn.commit()\n"
-        "    # TODO-SOLUTION-END\n"
-        "    return text\n"
-        "\n"
-        "\n"
-        "b = latest_briefing()\n"
-        "check(b is not None and b[\"payload\"][\"curated_memories\"] >= 3,\n"
-        "      f\"briefing payload built in-database: {json.dumps(b['payload'])[:120]}...\")\n"
-        "print()\n"
-        "print(narrate_briefing())"
-    ),
-]
-
-# --------------------------------------------------------------------------
 # Section: recall with provenance, recency, and supersession
 # --------------------------------------------------------------------------
 RECALL = [
     md(
-        "## 6 · Supersession in action, and recall that prefers the present\n"
+        "## 5 · Supersession in action, and recall that prefers the present\n"
         "\n"
         "The repair note arrives and is promoted like any other - and the\n"
         "store's link step recognises that it completes the defect: it writes a `supersedes`\n"
@@ -704,7 +619,7 @@ RECALL = [
     code(
         "def recall(query, asset_id, k=5):\n"
         "    \"\"\"Current memories only -> provenance from metadata -> recency re-rank.\"\"\"\n"
-        "    # ✏️ TODO(4): ask the store for CURRENT memory records only: record_types=[\"memory\"]\n"
+        "    # ✏️ TODO(3): ask the store for CURRENT memory records only: record_types=[\"memory\"]\n"
         "    #             (raw thread messages are searchable too, and are never invalidated)\n"
         "    #             and include_invalid_results=False.\n"
         "    # TODO-SOLUTION-START\n"
@@ -739,7 +654,7 @@ RECALL = [
 # --------------------------------------------------------------------------
 TRACE = [
     md(
-        "## 6b · Follow one note, end to end\n\n"
+        "## 5b · Follow one note, end to end\n\n"
         "Every mechanism above touched a *different* note. Here we take a **single** note and\n"
         "watch it move through every stage, printing where it lives after each step - its\n"
         "scratch status, and the memory it became, with its provenance and lifecycle status.\n"
@@ -836,9 +751,9 @@ TRACE = [
 # --------------------------------------------------------------------------
 RELATIONS = [
     md(
-        "## 6c · The relation itself: what the store wrote, and what it buys\n"
+        "## 5c · The relation itself: what the store wrote, and what it buys\n"
         "\n"
-        "Section 6's supersession was never ours: the store's link step wrote a `supersedes`\n"
+        "Section 5's supersession was never ours: the store's link step wrote a `supersedes`\n"
         "relation into the managed `CITY_MEMORY_LINK` table and flipped the defect to `invalid`.\n"
         "This section looks at that relation directly - as **data**, not just a status flag:\n"
         "\n"
@@ -847,7 +762,7 @@ RELATIONS = [
         "| *what is true now?* | `search(..., include_invalid_results=False)` |\n"
         "| *what did we used to believe, and what changed it?* | `num_hops=1` follows the link from the old memory to the new one |\n"
         "| *the store got it wrong* | `delete_record_link` - a trigger revalidates the old memory |\n"
-        "| *I know two memories are related; the store doesn't* | `link_records` (TODO 5) |\n"
+        "| *I know two memories are related; the store doesn't* | `link_records` (TODO 4) |\n"
         "\n"
         "Which relations invalidate? `supersedes`, `refines` and `duplicates` flip their target to\n"
         "`invalid`; `contradicts` and `supports` leave both memories current.\n"
@@ -857,7 +772,7 @@ RELATIONS = [
         "the policy - and check it.**"
     ),
     code(
-        "# The two memories in this relation came from Section 6's promotion of the repair note.\n"
+        "# The two memories in this relation came from Section 5's promotion of the repair note.\n"
         "# Find them by provenance - no sidecar, no raw SQL.\n"
         "_d, _r = memories_from(SUPERSEDE_DEFECT_PATH), memories_from(SUPERSEDE_REPAIR_PATH)\n"
         "DEFECT_MID = _d[0].id if _d else None\n"
@@ -891,7 +806,7 @@ RELATIONS = [
         "    return getattr(hit.status, \"value\", hit.status)"
     ),
     code(
-        "# Nothing below created this. Section 6 posted the repair note; the store linked it.\n"
+        "# Nothing below created this. Section 5 posted the repair note; the store linked it.\n"
         "_defect, _rels = linked(DEFECT_MID)\n"
         "print(f\"relations touching the defect memory ({len(_rels)}):\")\n"
         "for _rel, _other in _rels:\n"
@@ -908,7 +823,7 @@ RELATIONS = [
         "      \"no column of ours involved\")"
     ),
     md(
-        "**The payoff is not the hiding - it is the asking.** `recall()` in Section 6 can only\n"
+        "**The payoff is not the hiding - it is the asking.** `recall()` in Section 5 can only\n"
         "*suppress* a superseded memory. A relation is data, so one store answers both\n"
         "questions: *what is true now?* and *what did we believe before, and what changed\n"
         "it?* The first is `include_invalid_results=False`; the second is `num_hops=1`."
@@ -948,7 +863,7 @@ RELATIONS = [
         "      f\"deleting the relation revalidated the memory (status={_restored!r}) - \"\n"
         "      \"the trigger did that, not our code\")\n"
         "\n"
-        "# \u270f\ufe0f TODO(5): put it back by hand. The repair memory SUPERSEDES the defect one -\n"
+        "# \u270f\ufe0f TODO(4): put it back by hand. The repair memory SUPERSEDES the defect one -\n"
         "#             direction matters, and the source is the memory that wins. Both\n"
         "#             endpoints are memory-like records, so pass record_type 'memory' for\n"
         "#             each, and carry the provenance path in metadata so the link explains\n"
@@ -970,6 +885,80 @@ RELATIONS = [
 ]
 
 # --------------------------------------------------------------------------
+# Section: the briefing, built from current memory
+# --------------------------------------------------------------------------
+BRIEFING = [
+    md(
+        "## 6 · The morning briefing, built from current memory\n\n"
+        "Everything so far pays off here. The briefing reads the asset's **current** memories\n"
+        "- superseded ones are already `invalid`, so the corroded-bearing defect is not\n"
+        "reported as open - plus a few numbers from the findings table. The model narrates;\n"
+        "the code decides what it is allowed to narrate, and every memory carries its\n"
+        "`source_path`, so each claim can be traced to the note it came from.\n\n"
+        "Run it from whatever scheduler you already have; the briefing is just a function."
+    ),
+    code(
+        "from datetime import date\n"
+        "\n"
+        "\n"
+        "def build_briefing(asset_id):\n"
+        "    \"\"\"Current, provenanced memories + recent finding counts. No model call.\"\"\"\n"
+        "    mems = memory.list_memories(user_id=asset_id, agent_id=\"CITY\", limit=200)\n"
+        "    current = [m for m in mems\n"
+        "               if status_value(m) == \"valid\" and \"source_path\" in (m.metadata or {})]\n"
+        "    with conn.cursor() as cur:\n"
+        "        cur.execute(\"\"\"SELECT severity, COUNT(*) FROM CITY_INSPECTION_FINDING\n"
+        "                       WHERE asset_id = :a AND days_ago <= 30\n"
+        "                       GROUP BY severity\"\"\", a=asset_id)\n"
+        "        findings = dict(cur.fetchall())\n"
+        "    return {\n"
+        "        \"asset\": asset_id,\n"
+        "        \"generated_for\": date.today().isoformat(),\n"
+        "        \"findings_last_30_days\": findings,\n"
+        "        \"memories\": sorted(({\"source_path\": m.metadata[\"source_path\"],\n"
+        "                             \"days_ago\": m.metadata.get(\"days_ago\") or 0,\n"
+        "                             \"content\": m.content} for m in current),\n"
+        "                           key=lambda r: r[\"days_ago\"]),\n"
+        "    }\n"
+        "\n"
+        "\n"
+        "BRIEFING_INPUT = build_briefing(ASSET_A)\n"
+        "for _m in BRIEFING_INPUT[\"memories\"]:\n"
+        "    print(f\"  {_m['days_ago']:>4}d  {_m['source_path']}\")\n"
+        "_paths = {m[\"source_path\"] for m in BRIEFING_INPUT[\"memories\"]}\n"
+        "check(SUPERSEDE_REPAIR_PATH in _paths and SUPERSEDE_DEFECT_PATH not in _paths,\n"
+        "      \"the briefing sees the repair, not the defect it superseded\")"
+    ),
+    code(
+        "def narrate_briefing(briefing):\n"
+        "    # ✏️ TODO(5): the grounded narration - ask CHAT for a <=6-sentence morning\n"
+        "    #             briefing using ONLY the memories and numbers in `briefing`, citing\n"
+        "    #             each memory's source_path in [brackets]. Return the text.\n"
+        "    # TODO-SOLUTION-START\n"
+        "    cfg = {\"callbacks\": [HANDLER]} if HANDLER else {}\n"
+        "    resp = CHAT.invoke(\n"
+        "        \"Write a morning asset-risk briefing for a city operations chief.\\n\"\n"
+        "        \"HARD RULE: use ONLY the memories and numbers in this JSON - do not estimate,\\n\"\n"
+        "        \"extrapolate, or invent. Cite each memory you use by its source_path in\\n\"\n"
+        "        \"[brackets]. <= 6 sentences, plain prose.\\n\\n\"\n"
+        "        + json.dumps(briefing), config=cfg)\n"
+        "    return resp.content if isinstance(resp.content, str) else \"\".join(\n"
+        "        p.get(\"text\", \"\") if isinstance(p, dict) else str(p) for p in resp.content)\n"
+        "    # TODO-SOLUTION-END\n"
+        "\n"
+        "\n"
+        "BRIEFING_TEXT = narrate_briefing(BRIEFING_INPUT)\n"
+        "print(BRIEFING_TEXT)\n"
+        "\n"
+        "# Kept as a scratch note: outside /inbox, so it is never promoted into memory.\n"
+        "BRIEFING_PATH = f\"/briefings/{ASSET_A}/{BRIEFING_INPUT['generated_for']}.md\"\n"
+        "write_note(BRIEFING_PATH, BRIEFING_TEXT)\n"
+        "_cited = sorted(p for p in _paths if p in BRIEFING_TEXT)\n"
+        "ok(f\"briefing saved to {BRIEFING_PATH}; cites {len(_cited)} of {len(_paths)} memories\")"
+    ),
+]
+
+# --------------------------------------------------------------------------
 # Section: continuity of work
 # --------------------------------------------------------------------------
 CONTINUITY = [
@@ -982,9 +971,8 @@ CONTINUITY = [
     ),
     code(
         "write_note(\"/plans/briefing_plan.md\", json.dumps({\n"
-        "    \"goal\": \"daily 06:00 asset-risk briefing, grounded narration on read\",\n"
-        "    \"done\": [\"inbox curated into memory\", \"briefing job scheduled\",\n"
-        "             \"first briefing narrated\"],\n"
+        "    \"goal\": \"daily asset-risk briefing from current memory, every claim cited\",\n"
+        "    \"done\": [\"inbox curated into memory\", \"first briefing narrated\"],\n"
         "    \"next\": \"review narration tone with operations chief; tune half-life\",\n"
         "}))\n"
         "ok(\"briefing plan state persisted to /plans/briefing_plan.md\")"
@@ -1011,7 +999,7 @@ CONTINUITY = [
         "_hits2 = memory2.search(\"bearing plate repair\", user_id=ASSET_A, agent_id=\"CITY\",\n"
         "                        max_results=2)\n"
         "with conn2.cursor() as cur:\n"
-        "    cur.execute(\"\"\"SELECT COUNT(*) FROM HARNESS_BRIEFING WHERE narrative IS NOT NULL\"\"\")\n"
+        "    cur.execute(\"SELECT COUNT(*) FROM HARNESS_SCRATCH WHERE path LIKE '/briefings/%'\")\n"
         "    _narrated = cur.fetchone()[0]\n"
         "check(len(plan[\"next\"]) > 0 and len(_hits2) > 0 and _narrated >= 1,\n"
         "      \"new session resumed the plan, the memories, and the briefing\")\n"
@@ -1032,10 +1020,9 @@ CLOSING = [
         "| No provenance, no supersession | Provenance as memory metadata (source path, revision, observed age); supersession as the store's own relations |\n"
 
         "| Nothing forgets | Superseded memories invalidated, out of current recall; recency weighted by the observation's real age |\n"
+        "| (payoff) | A briefing built only from current memory, each claim citing its source note |\n"
         "| Facts persist, work doesn't | Plan state resumed by a fresh session |\n\n"
-        "The briefing job stays scheduled after you close this notebook - that is the point.\n"
-        "Disable it any time with\n"
-        "`DBMS_SCHEDULER.DISABLE('HARNESS_BRIEFING_JOB')`.\n\n"
+
         "Next: **03 - Context engineering**, where compaction and offloading get measured for\n"
         "*fidelity*, not just size."
     ),
@@ -1047,7 +1034,7 @@ CLOSING = [
 ]
 
 SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, PRODUCER, TRIAGE, PROMOTION,
-            BRIEFING, RECALL, TRACE, RELATIONS, CONTINUITY, CLOSING]
+            RECALL, TRACE, RELATIONS, BRIEFING, CONTINUITY, CLOSING]
 
 
 def build() -> nbf.NotebookNode:

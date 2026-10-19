@@ -1408,9 +1408,9 @@ CLOSING = [
         "This notebook taught the copilot *how* to do recurring work (skills). What it\n"
         "chooses to *remember* - facts about assets, filed as notes - is a different kind of\n"
         "memory, and notebook 02's subject.\n\n"
-        "Next: **02 - Scheduled briefings**, where the *other* promotion path (scratch →\n"
+        "Next: **02 - Curated long-term memory**, where the *other* promotion path (scratch →\n"
         "long-term memory) gets the same treatment: the copilot as a note producer, opt-in\n"
-        "curation, provenance, supersession, and a consumer that is actually scheduled."
+        "curation, provenance, supersession, and a briefing built from current memory."
     ),
     md(
         "**Cross-notebook state check.** Asserts that the artifacts notebook 02 depends on are\n"

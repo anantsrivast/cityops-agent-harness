@@ -6,7 +6,7 @@ notebook `notebook_complete_ollama.ipynb` must stay untouched.
 
 ## Series and build order
 
-foundation → 01 self-improving copilot → 02 scheduled briefings → 03 context
+foundation → 01 self-improving copilot → 02 curated long-term memory → 03 context
 engineering → 04 evals.
 
 - Design spec: `docs/superpowers/specs/2026-07-21-cityops-agent-harness-design.md`
@@ -26,8 +26,8 @@ Live-verification currency, which drifts as notebooks change: nb03 re-verified
 2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 **2026-10-19: 0 cell errors, 30 green
 checks** (`LANGFUSE_MODE=off`),
 nb02 **2026-10-19 on 26.8 (SDK-native curation): 0 cell errors, 43 green checks**
-(`LANGFUSE_MODE=off`), §7c (now §6c) included - but that pass predates the
-same-day queue removal, so nb02 owes a live re-run; nb00 2026-07-25. That nb03 pass is the first since the
+(`LANGFUSE_MODE=off`), §7c (now §5c) included - but that pass predates the
+same-day removal of scheduling and the briefing rebuild, so nb02 owes a live re-run; nb00 2026-07-25. That nb03 pass is the first since the
 2026-08-10 `merge_card` strength fix and confirms §4b live: the facts list grows
 to 10 then *shrinks* to 6 as gist absorbs 4 evicted facts, holding ~4.2k against
 the 4000-char ceiling while the additive card runs to 14.7k, with no planted fact
@@ -49,12 +49,14 @@ and 5 could pass vacuously or crash on the exact cases they existed to catch.
 Keep an assertion on the mechanism it names - a check that fails for an unrelated
 sub-skill, or cannot fail at all, measures nothing.
 
-The `CREATE PROCEDURE` / `CREATE JOB` grants are in place, and
-`HARNESS_BRIEFING_JOB` (daily 06:00) is left **enabled** on the ADB by design —
-notebook 02's closing documents disabling it with `DBMS_SCHEDULER.DISABLE(...)`.
-Notebook 02 no longer has a promotion queue (removed 2026-10-19: orchestration, not
-memory). §4 promotes the inbox with direct `promote_note` calls and drops a leftover
-`HARNESS_STAGE_JOB` / `HARNESS_STAGE_INBOX` / `HARNESS_PROMOTION_QUEUE` if present.
+Notebook 02 has **no scheduling at all** (decided 2026-10-19: orchestration is not
+memory). The promotion queue, the hourly stage job and the in-database briefing job
+are gone; §4 promotes this run's notes with direct `promote_note` calls, and §6 builds
+the briefing from current memory through the SDK and saves it under `/briefings/`.
+§0 drops any leftover `HARNESS_STAGE_JOB` / `HARNESS_BRIEFING_JOB`, their procedures,
+`HARNESS_PROMOTION_QUEUE` and `HARNESS_BRIEFING`, and needs only `CREATE TRIGGER`.
+The file keeps the `02_scheduled_briefings` name so registry keys and nb03/nb04's
+`require`/`verify` calls are unchanged; the title is "Curated long-term memory".
 
 All work is on `main`; the `foundation` branch is history.
 
@@ -107,10 +109,11 @@ All work is on `main`; the `foundation` branch is history.
   - Invalidating relations are `supersedes`, `refines`, `duplicates` (the
     `CITY_MEMORY_LINK_DELETE_TRG` trigger and a direct test agree);
     `contradicts` / `supports` leave both memories valid.
-  - The in-database briefing job cannot use the SDK, so it is the one place
-    that reads `CITY_MEMORY` in SQL (`status='valid'`, `JSON_EXISTS(metadata,
-    '$.source_path')`).
-  - Do not write a §6c that *creates* the supersedes link before checking -
+  - Nothing in nb02 reads `CITY_MEMORY` in SQL any more; the briefing uses
+    `list_memories` and filters to `valid` + `source_path`.
+  - `remember` canonicalises `asset_id` against `CITY_INSPECTION_FINDING`: the
+    model said `harbor_bridge` live, which filed memories under a separate user.
+  - Do not write a §5c that *creates* the supersedes link before checking -
     a conflicting relation raises `ValueError: A conflicting memory relation
     already exists.`
 - API shapes worth not re-deriving: `search(num_hops=1)` attaches
@@ -160,12 +163,9 @@ All work is on `main`; the `foundation` branch is history.
   revalidates a memory when an invalidating relation is deleted. Without
   CREATE TRIGGER *every* 26.8 store open fails `ORA-01031` - fresh creates and
   upgrades alike, and `REQUIRE_EXISTING` too (it demands v13) - so nb02 cannot
-  run at all. §0 checks CREATE PROCEDURE, CREATE JOB and CREATE TRIGGER and
+  run at all. §0 checks CREATE TRIGGER (nb02's only grant now) and
   raises before the store is opened, so a missing grant is a red check rather
   than a half-migrated store. It cannot guard the `ORA-00054` lock variant.
-- **Blocked on ADMIN:** `GRANT CREATE PROCEDURE TO ANANT;` and
-  `GRANT CREATE JOB TO ANANT;` — phase 02 task 7 cannot run without them.
-  (Both are in place on this ADB.) Notebook 03 deliberately needs neither.
 - The ADB caps concurrent sessions at **30** (Developer tier). `get_connection`
   pools at 2 per process; exhaustion surfaces as `ORA-12506`/`DPY-6000`, which
   reads like the database is down even though the console shows it Available.

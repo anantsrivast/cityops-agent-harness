@@ -68,10 +68,10 @@ SETUP = [
         "ok(f\"connected - provider={settings.llm_provider}, langfuse={settings.langfuse_mode}\")"
     ),
     md(
-        "Notebook 02's status is reported, not enforced. Its scheduler jobs need\n"
-        "`CREATE JOB`, which is a database grant, not a context-engineering concept -\n"
-        "failing this notebook over it would be the wrong dependency. The one thing we\n"
-        "genuinely need from 02 is its scratch table, so we backfill that if it is absent."
+        "Notebook 02's status is reported, not enforced - its memory store is not a\n"
+        "context-engineering concept, so failing this notebook over it would be the wrong\n"
+        "dependency. The one thing we genuinely need from 02 is its scratch table, so we\n"
+        "backfill that if it is absent."
     ),
     code(
         "for desc, passed in verify(conn, \"02_scheduled_briefings\"):\n"

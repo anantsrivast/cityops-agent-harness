@@ -75,12 +75,12 @@ def test_registry_seeds_notebook_01():
 def test_registry_seeds_notebook_02():
     checks = REGISTRY["02_scheduled_briefings"]
     sqls = " ".join(c.sql for c in checks)
-    assert len(checks) == 5
-    for t in ("HARNESS_SCRATCH", "CITY_MEMORY_LINK",
-              "HARNESS_BRIEFING", "CITY_MEMORY"):
+    assert len(checks) == 4
+    for t in ("HARNESS_SCRATCH", "CITY_MEMORY_LINK", "CITY_MEMORY", "/briefings/"):
         assert t in sqls
-    assert "user_scheduler_jobs" in sqls
+    # orchestration is gone from notebook 02: no queue, no scheduler jobs
     assert "HARNESS_PROMOTION_QUEUE" not in sqls
+    assert "user_scheduler_jobs" not in sqls
 
 
 def test_registry_seeds_notebook_03():

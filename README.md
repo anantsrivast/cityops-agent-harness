@@ -13,7 +13,7 @@ actually works.
 |---|---|
 | `notebooks/00_setup.ipynb` | Verify ADB, in-DB embeddings, LLM provider, Langfuse |
 | `notebooks/01_self_improving_copilot_complete.ipynb` (+ `_todo`) | Tool registry, verified workflow capture, skill harvesting with lifecycle |
-| `notebooks/02_scheduled_briefings_complete.ipynb` (+ `_todo`) | Curated whole-note promotion, provenance + supersession, DBMS_SCHEDULER pipeline, morning briefing, the same supersession as a first-class graph relation |
+| `notebooks/02_scheduled_briefings_complete.ipynb` (+ `_todo`) | Curated whole-note promotion, provenance as memory metadata, supersession as the store's own graph relation, a briefing built from current memory |
 | `notebooks/03_context_engineering_complete.ipynb` (+ `_todo`) | Compaction with a card-fidelity probe, agent-in-the-loop offloading, blobs barred from promotion |
 | `notebooks/04_evals_complete.ipynb` (+ `_todo`) | Five Langfuse evals: promotion precision, skill fidelity, skills-help, card fidelity over horizon, cost per correct |
 
@@ -55,8 +55,6 @@ cp .env.example .env        # fill in DB_PASSWORD, WALLET_PASSWORD, keys
 >
 > ```sql
 > GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;   -- nb00: loads the ONNX model
-> GRANT CREATE PROCEDURE TO <your_user>;        -- nb02: scheduled briefing
-> GRANT CREATE JOB TO <your_user>;              -- nb02: scheduled briefing
 > GRANT CREATE TRIGGER TO <your_user>;          -- nb02: Agent Memory v13 schema
 > ```
 >

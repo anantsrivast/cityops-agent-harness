@@ -54,19 +54,12 @@ REGISTRY: dict[str, list[ArtifactCheck]] = {
             sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'CITY_MEMORY_LINK'",
         ),
         ArtifactCheck(
-            description="briefing store HARNESS_BRIEFING",
-            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_BRIEFING'",
-        ),
-        ArtifactCheck(
             description="SDK long-term memory table CITY_MEMORY",
             sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'CITY_MEMORY'",
         ),
         ArtifactCheck(
-            description="scheduled briefing job HARNESS_BRIEFING_JOB registered",
-            sql=(
-                "SELECT COUNT(*) FROM user_scheduler_jobs "
-                "WHERE job_name = 'HARNESS_BRIEFING_JOB'"
-            ),
+            description="a briefing note built from current memory",
+            sql="SELECT COUNT(*) FROM HARNESS_SCRATCH WHERE path LIKE '/briefings/%'",
         ),
     ],
     "03_context_engineering": [

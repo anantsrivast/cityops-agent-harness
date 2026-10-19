@@ -94,19 +94,17 @@ secrets — you don't paste them into `.env`. Confirm everything is wired up by
 running **`notebooks/00_setup.ipynb`** top to bottom; every section ends in a
 green check.
 
-> **Non-ADMIN DB users:** run all four as ADMIN before you start:
+> **Non-ADMIN DB users:** run both as ADMIN before you start:
 >
 > ```sql
 > GRANT EXECUTE ON DBMS_CLOUD TO <your_user>;   -- nb00: LOAD_ONNX_MODEL_CLOUD
-> GRANT CREATE PROCEDURE TO <your_user>;        -- nb02: scheduled pipeline
-> GRANT CREATE JOB TO <your_user>;              -- nb02: scheduled pipeline
 > GRANT CREATE TRIGGER TO <your_user>;          -- nb02: Agent Memory v13 schema
 > ```
 >
 > `CREATE TRIGGER` arrived with Oracle Agent Memory 26.8: its managed schema
 > (v13) adds a `<PREFIX>MEMORY_LINK` table and a delete trigger that revalidates
 > memories when an invalidating relation goes away. Notebook 02 §0 verifies the
-> privileges before any schema DDL runs, so a missing grant is a red check with a
+> privilege before any schema DDL runs, so a missing grant is a red check with a
 > `GRANT` to copy rather than a broken store.
 
 **Starting fresh? Nothing below applies.** A new store is created directly at
@@ -227,13 +225,6 @@ Add `-v` to also delete the stored traces/datasets:
 
 ```bash
 docker compose -f docker-compose.langfuse.yml -f docker-compose.langfuse.override.yml down -v
-```
-
-**Stop the ADB scheduler job** notebook 02 leaves running (it fires daily by
-design). From any notebook cell or SQL client:
-
-```sql
-BEGIN DBMS_SCHEDULER.DISABLE('HARNESS_BRIEFING_JOB'); END;
 ```
 
 **Stop the Codespace:** it auto-suspends when idle; to end it, Code → Codespaces
