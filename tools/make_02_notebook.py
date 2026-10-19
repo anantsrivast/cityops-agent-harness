@@ -167,7 +167,11 @@ SCRATCH = [
         "A plain table posing as a tiny filesystem. Inspectors jot notes all day; only\n"
         "`/inbox/<asset>/...` is a promotion *candidate area*. Working files - drafts,\n"
         "abandoned queries, tool dumps - live outside it and are **never** promoted, which\n"
-        "restores the scratchpad's contract the review showed the old pipeline destroyed."
+        "restores the scratchpad's contract the review showed the old pipeline destroyed.\n\n"
+        "**Every run starts from a clean slate.** The seed cell wipes the scratchpad and every\n"
+        "memory an earlier run of this notebook promoted (any `CITY` memory carrying a\n"
+        "`source_path`), so what you see below came from *this* run - not from a version of\n"
+        "the notebook that no longer exists."
     ),
     code(
         "def _table_exists(name):\n"
@@ -232,6 +236,16 @@ SCRATCH = [
         "    _logs = json.load(f)\n"
         "_asset_names = sorted({x[\"asset_name\"] for x in _logs})\n"
         "ASSET_A = \"Harbor Bridge\" if \"Harbor Bridge\" in _asset_names else _asset_names[0]\n"
+        "\n"
+        "# Clean slate: forget what earlier runs promoted, then the scratchpad itself.\n"
+        "_old = [m for m in memory.list_memories(agent_id=\"CITY\", limit=None)\n"
+        "        if \"source_path\" in (m.metadata or {})]\n"
+        "for _m in _old:\n"
+        "    memory.delete_memory(_m.id)\n"
+        "with conn.cursor() as cur:\n"
+        "    cur.execute(\"DELETE FROM HARNESS_SCRATCH\")\n"
+        "conn.commit()\n"
+        "print(f\"reset: {len(_old)} promoted memories and the scratchpad cleared\")\n"
         "\n"
         "# Seed the inbox with real field narratives (non-routine first - richer signal),\n"
         "# and the review's own cautionary trio OUTSIDE the inbox.\n"
@@ -404,8 +418,7 @@ PROMOTION = [
         "concern, so this notebook does not teach it."
     ),
     code(
-        "# This run's notes: the seed and the working files. Leftovers from earlier runs\n"
-        "# are not ours to judge here.\n"
+        "# This run's notes: the seed and the working files (the scratchpad was reset in §2).\n"
         "_this_run = ([p for p, _c, _d in INBOX_SEED] + [SUPERSEDE_DEFECT_PATH]\n"
         "             + [\"/work/draft_notes.md\", \"/work/attempt1_wrong.sql\",\n"
         "                \"/tool_out/similar_dump.json\"])\n"
@@ -472,10 +485,6 @@ RECALL = [
         "(that record is history), but its memory flips to **invalid**, with the store's reason."
     ),
     code(
-        "# Start this step clean on a re-run: an earlier run's repair memory would otherwise\n"
-        "# show up at stage 2, before the note has even been promoted.\n"
-        "for _m in memories_from(SUPERSEDE_REPAIR_PATH):\n"
-        "    memory.delete_memory(_m.id)\n"
         "write_note(SUPERSEDE_REPAIR_PATH,\n"
         "           f\"Bearing plates at pier 2 of {ASSET_A} replaced and recoated on today's\"\n"
         "           \" shift; corrosion remediated, section loss addressed. Load rating\"\n"

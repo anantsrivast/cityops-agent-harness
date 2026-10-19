@@ -250,7 +250,9 @@ supersession, and ends in a morning briefing built only from **current** memory.
 Scheduling is deliberately out of scope: it is orchestration, not memory.
 
 The scratch store is a small filesystem-in-a-table: each note is a row with a
-**path** (a policy label), content, and a status.
+**path** (a policy label), content, and a status. Every run starts clean: the seed cell
+wipes the scratchpad and every memory an earlier run promoted, so a run's output never
+mixes with an older version of the notebook.
 
 ```mermaid
 flowchart LR

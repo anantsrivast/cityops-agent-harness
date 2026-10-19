@@ -57,6 +57,10 @@ are gone; §4 promotes this run's notes with direct `promote_note` calls, and §
 the briefing from current memory through the SDK and saves it under `/briefings/`.
 §0 drops any leftover `HARNESS_STAGE_JOB` / `HARNESS_BRIEFING_JOB`, their procedures,
 `HARNESS_PROMOTION_QUEUE` and `HARNESS_BRIEFING`, and needs only `CREATE TRIGGER`.
+nb02 §2 resets state every run (decided 2026-10-19): it deletes every `CITY` memory
+with `source_path` metadata, across all users, and empties `HARNESS_SCRATCH` - the
+old `harbor_bridge` / pier-7 leftovers were polluting recall and the briefing.
+Inbox threads and their raw messages are left; recall filters them by record type.
 The copilot-as-producer section (nb01 §8b, moved to nb02 §2b on 2026-10-19) was
 deleted the same day: a live agent loop that the memory mechanics never depended on.
 The file keeps the `02_scheduled_briefings` name so registry keys and nb03/nb04's
