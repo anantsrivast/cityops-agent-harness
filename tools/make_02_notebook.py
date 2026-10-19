@@ -41,9 +41,7 @@ INTRO = [
 SETUP = [
     md("## 0 · Setup\n\nConnect, verify notebook 01's artifacts, check privileges, stand up the embedder."),
     code(
-        "import array\n"
         "import json\n"
-        "import uuid\n"
         "\n"
         "from cityops_harness.checks import ok, check\n"
         "from cityops_harness.config import load_settings\n"
@@ -264,159 +262,6 @@ SCRATCH = [
 ]
 
 # --------------------------------------------------------------------------
-# Section: the copilot as a memory producer (moved from notebook 01 §8b)
-# --------------------------------------------------------------------------
-PRODUCER = [
-    md(
-        "## 2b · Where inbox notes really come from: the copilot as a *producer*\n\n"
-        "The seed above is hand-written. In production the notes come from the copilot\n"
-        "itself, deciding what is worth remembering while it works.\n\n"
-        "The design choice worth noticing: the agent is **never told about directories**. It\n"
-        "gets one `remember(asset_id, note, durable)` tool and judges only *is this worth\n"
-        "keeping?*. The **tool** owns the convention - `durable=True` files to `/inbox` (the\n"
-        "opt-in area this notebook promotes from), `durable=False` to `/work` (scratch, never\n"
-        "promoted). Placement is policy; the agent only supplies judgement."
-    ),
-    md(
-        "**The `remember` tool, plus one read tool.** `remember` writes through the same\n"
-        "`write_note` as the seed, so an agent-filed note enters exactly the pipeline the\n"
-        "seeded ones do. The path is derived, never chosen by the model - and so is the asset\n"
-        "id: `harbor_bridge` resolves to `Harbor Bridge`, an unknown asset is refused.\n"
-        "`tool_find_similar_findings` is a read-only copy of notebook 01's search, so the\n"
-        "copilot has real history to judge against."
-    ),
-    code(
-        "import re\n"
-        "from langchain_core.tools import tool\n"
-        "\n"
-        "\n"
-        "def _slug(text):\n"
-        "    return re.sub(r\"[^a-z0-9]+\", \"-\", text.lower()).strip(\"-\")[:40] or \"note\"\n"
-        "\n"
-        "\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"SELECT DISTINCT asset_id FROM CITY_INSPECTION_FINDING\")\n"
-        "    KNOWN_ASSETS = {_slug(r[0]): r[0] for r in cur.fetchall()}\n"
-        "\n"
-        "\n"
-        "def canonical_asset(asset_id):\n"
-        "    \"\"\"The model may say 'harbor_bridge'; memory is keyed by 'Harbor Bridge'. A note\n"
-        "    filed under a variant would land in a different memory user, where supersession\n"
-        "    and recall never see it - so the tool resolves the id, or refuses.\"\"\"\n"
-        "    if asset_id is None:\n"
-        "        return None\n"
-        "    if _slug(asset_id) not in KNOWN_ASSETS:\n"
-        "        raise ValueError(f\"unknown asset {asset_id!r}; known: {sorted(KNOWN_ASSETS.values())}\")\n"
-        "    return KNOWN_ASSETS[_slug(asset_id)]\n"
-        "\n"
-        "\n"
-        "@tool\n"
-        "def remember(asset_id: str, note: str, durable: bool) -> str:\n"
-        "    \"\"\"File a note for long-term memory curation.\n"
-        "    durable=True  -> a completed, keep-worthy finding (enters the promotion inbox).\n"
-        "    durable=False -> scratch reasoning or a dead end (kept OUT of long-term memory).\n"
-        "    Returns the path it was filed under. You never choose the path.\"\"\"\n"
-        "    if durable:\n"
-        "        path = f\"/inbox/{canonical_asset(asset_id)}/{_slug(note)}.md\"\n"
-        "    else:\n"
-        "        path = f\"/work/{_slug(note)}.md\"\n"
-        "    write_note(path, note)\n"
-        "    return path\n"
-        "\n"
-        "\n"
-        "@tool\n"
-        "def tool_find_similar_findings(description: str, asset_id: str = None, k: int = 3) -> str:\n"
-        "    \"\"\"Search past inspection findings semantically similar to a description.\n"
-        "    Returns finding_id, category, severity, days_ago and description per hit.\"\"\"\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(f\"\"\"SELECT finding_id, category, severity, days_ago, description\n"
-        "                         FROM CITY_INSPECTION_FINDING\n"
-        "                        WHERE (:a IS NULL OR asset_id = :a)\n"
-        "                        ORDER BY VECTOR_DISTANCE(embedding,\n"
-        "                                 VECTOR_EMBEDDING({settings.embed_model} USING :q AS data),\n"
-        "                                 COSINE)\n"
-        "                        FETCH FIRST :k ROWS ONLY\"\"\",\n"
-        "                    a=canonical_asset(asset_id), q=description, k=k)\n"
-        "        cols = [d[0].lower() for d in cur.description]\n"
-        "        hits = []\n"
-        "        for r in cur.fetchall():\n"
-        "            row = dict(zip(cols, r))\n"
-        "            if hasattr(row[\"description\"], \"read\"):\n"
-        "                row[\"description\"] = row[\"description\"].read()\n"
-        "            hits.append(row)\n"
-        "    return json.dumps(hits, default=str)\n"
-        "\n"
-        "ok(\"remember() ready - the tool owns placement and the asset id; the agent only judges\")"
-    ),
-    md(
-        "**Run the producer.** The copilot gets the search tool *plus* `remember`, and a prompt\n"
-        "that asks it to keep durable findings and discard scratch - in those words, not in\n"
-        "directory names. Watch the `remember(... durable=True/False ...)` calls: the model\n"
-        "decides worth, the tool decides where.\n\n"
-        "The task is about the expansion-joint anchor bolts on purpose: the pier-2 bearing\n"
-        "notes seeded above are the supersession demo in Section 5, and an agent note on the\n"
-        "same defect would compete with them."
-    ),
-    code(
-        "from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage\n"
-        "\n"
-        "PRODUCER_PROMPT = (\n"
-        "    \"You are the CityOps inspection copilot, now also responsible for what gets\\n\"\n"
-        "    \"remembered. Do the task through your tools. Before you finish, call remember():\\n\"\n"
-        "    \"  - durable=True for each completed, keep-worthy finding (one short paragraph);\\n\"\n"
-        "    \"  - durable=False for scratch reasoning or a dead end you do NOT want kept.\\n\"\n"
-        "    \"You never choose folders or paths - remember() files each note where it belongs.\"\n"
-        ")\n"
-        "\n"
-        "PRODUCER_TOOLS = {t.name: t for t in (tool_find_similar_findings, remember)}\n"
-        "_pmodel = CHAT.bind_tools(list(PRODUCER_TOOLS.values()))\n"
-        "_cfg = {\"callbacks\": [HANDLER]} if HANDLER else {}\n"
-        "task = (f\"Inspect the expansion-joint anchor bolts on {ASSET_A} for pitting: check\"\n"
-        "        f\" similar past findings first, remember what matters, and explicitly discard\"\n"
-        "        f\" your scratch reasoning.\")\n"
-        "msgs = [SystemMessage(content=PRODUCER_PROMPT), HumanMessage(content=task)]\n"
-        "\n"
-        "FILED = []   # (durable, path) for every remember() call THIS run made\n"
-        "for _ in range(6):\n"
-        "    resp = _pmodel.invoke(msgs, config=_cfg)\n"
-        "    msgs.append(resp)\n"
-        "    if not getattr(resp, \"tool_calls\", None):\n"
-        "        break\n"
-        "    for tc in resp.tool_calls:\n"
-        "        try:\n"
-        "            result = str(PRODUCER_TOOLS[tc[\"name\"]].invoke(tc[\"args\"], _cfg))\n"
-        "        except Exception as e:\n"
-        "            result = f\"ERROR: {type(e).__name__}: {e}\"\n"
-        "        if tc[\"name\"] == \"remember\":\n"
-        "            FILED.append((bool(tc[\"args\"].get(\"durable\")), result))\n"
-        "            print(f\"  remember(durable={tc['args'].get('durable')}) -> {result}\")\n"
-        "        else:\n"
-        "            print(f\"  {tc['name']}(...) = {result[:60]}\")\n"
-        "        msgs.append(ToolMessage(content=result, tool_call_id=tc[\"id\"]))\n"
-        "\n"
-        "_ans = resp.content if isinstance(resp.content, str) else \"\".join(\n"
-        "    p.get(\"text\", \"\") if isinstance(p, dict) else str(p) for p in resp.content)\n"
-        "print(\"\\nagent:\", _ans.strip()[:280])"
-    ),
-    md(
-        "**What the agent filed.** Checked against *this run's* `remember` calls, not the\n"
-        "whole table - leftover notes from an earlier run must not be able to pass it."
-    ),
-    code(
-        "for durable, path in FILED:\n"
-        "    print(f\"  {'durable' if durable else 'scratch':8} {read_note(path)['status']}  {path}\")\n"
-        "\n"
-        "_kept = [p for d, p in FILED if d]\n"
-        "check(bool(_kept), f\"the copilot filed {len(_kept)} durable note(s) into the inbox\")\n"
-        "check(all(promote.triage_allowed(p) == d for d, p in FILED),\n"
-        "      \"every durable note landed in /inbox, and every scratch note outside it\")\n"
-        "check(all(p.startswith(f\"/inbox/{ASSET_A}/\") for p in _kept),\n"
-        "      f\"every durable note is filed under the canonical asset id {ASSET_A!r}\")\n"
-        "ok(\"producer wired - Section 4 promotes these notes along with the seed\")"
-    ),
-]
-
-# --------------------------------------------------------------------------
 # Section: the curation gate (the store's extraction, under our instructions)
 # --------------------------------------------------------------------------
 TRIAGE = [
@@ -553,19 +398,17 @@ PROMOTION = [
         "ok(\"promotion defined: gate -> the store's extraction (keep / drop) -> provenance on the memory\")"
     ),
     md(
-        "**Promote the inbox.** One `promote_note` call per new note - the seed, the copilot's\n"
-        "notes from Section 2b, and the working files outside `/inbox` (which the gate drops\n"
-        "without a model call). In production this runs wherever notes are written: right\n"
-        "after `remember()`, or from whatever scheduler you already run - orchestration is\n"
-        "not a memory concern, so this notebook does not teach it."
+        "**Promote the inbox.** One `promote_note` call per new note - the seed, and the\n"
+        "working files outside `/inbox` (which the gate drops without a model call). In\n"
+        "production this runs wherever notes are written - orchestration is not a memory\n"
+        "concern, so this notebook does not teach it."
     ),
     code(
-        "# This run's notes: the seed, the working files, and what the copilot filed in 2b.\n"
-        "# Leftovers from earlier runs are not ours to judge here.\n"
+        "# This run's notes: the seed and the working files. Leftovers from earlier runs\n"
+        "# are not ours to judge here.\n"
         "_this_run = ([p for p, _c, _d in INBOX_SEED] + [SUPERSEDE_DEFECT_PATH]\n"
         "             + [\"/work/draft_notes.md\", \"/work/attempt1_wrong.sql\",\n"
-        "                \"/tool_out/similar_dump.json\"]\n"
-        "             + [p for _d, p in FILED])\n"
+        "                \"/tool_out/similar_dump.json\"])\n"
         "# Promote only the NEW ones, so re-running this cell settles nothing twice.\n"
         "for p in _this_run:\n"
         "    if read_note(p)[\"status\"] == \"N\":\n"
@@ -1033,7 +876,7 @@ CLOSING = [
     ),
 ]
 
-SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, PRODUCER, TRIAGE, PROMOTION,
+SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, TRIAGE, PROMOTION,
             RECALL, TRACE, RELATIONS, BRIEFING, CONTINUITY, CLOSING]
 
 

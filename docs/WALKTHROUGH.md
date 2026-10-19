@@ -254,24 +254,13 @@ The scratch store is a small filesystem-in-a-table: each note is a row with a
 
 ```mermaid
 flowchart LR
-  w["remember() / write_note()"] --> SC[("HARNESS_SCRATCH<br/>status = N")]
+  w["write_note()"] --> SC[("HARNESS_SCRATCH<br/>status = N")]
   SC --> PN["promote_note(path)"]
   PN -->|"outside /inbox"| DD["status D"]
   PN -->|"/inbox"| TG{"store's extraction<br/>(our curation instructions)"}
   TG -->|kept| PR["one verbatim memory in CITY_MEMORY<br/>+ provenance metadata · status P"]
   TG -->|dropped| DD
 ```
-
-### 3.0 · Where notes come from: the copilot as a producer (§2b)
-
-Before the pipeline runs, the copilot itself files notes. It gets a `remember(asset_id,
-note, durable)` tool and one read-only search tool. The design choice worth
-internalizing: **the agent is never told about directories.** It judges only *"is this
-worth keeping?"*; the tool files `durable=True` into `/inbox` (the opt-in area) and
-`durable=False` into `/work` (scratch). Placement is policy the tool owns; the agent
-supplies judgement. Its notes then go through the same staging and curation as the
-hand-seeded ones. (This section lived in notebook 01 as §8b until 2026-10-19; it moved
-here because notes are notebook 02's kind of memory, not notebook 01's.)
 
 ### 3.1 · Two gates, cheap before expensive
 
@@ -291,9 +280,8 @@ Curation happens **before** anything is durable, in two stages:
 ```mermaid
 stateDiagram-v2
   [*] --> N: written
-  N --> S: producer stages (/inbox only)
-  S --> P: extraction keeps it → one memory
-  S --> D: extraction drops it
+  N --> P: /inbox + extraction keeps it → one memory
+  N --> D: outside /inbox, or extraction drops it
 ```
 
 ### 3.2 · Whole notes, verbatim, with provenance on the memory

@@ -55,6 +55,8 @@ are gone; §4 promotes this run's notes with direct `promote_note` calls, and §
 the briefing from current memory through the SDK and saves it under `/briefings/`.
 §0 drops any leftover `HARNESS_STAGE_JOB` / `HARNESS_BRIEFING_JOB`, their procedures,
 `HARNESS_PROMOTION_QUEUE` and `HARNESS_BRIEFING`, and needs only `CREATE TRIGGER`.
+The copilot-as-producer section (nb01 §8b, moved to nb02 §2b on 2026-10-19) was
+deleted the same day: a live agent loop that the memory mechanics never depended on.
 The file keeps the `02_scheduled_briefings` name so registry keys and nb03/nb04's
 `require`/`verify` calls are unchanged; the title is "Curated long-term memory".
 
@@ -111,8 +113,6 @@ All work is on `main`; the `foundation` branch is history.
     `contradicts` / `supports` leave both memories valid.
   - Nothing in nb02 reads `CITY_MEMORY` in SQL any more; the briefing uses
     `list_memories` and filters to `valid` + `source_path`.
-  - `remember` canonicalises `asset_id` against `CITY_INSPECTION_FINDING`: the
-    model said `harbor_bridge` live, which filed memories under a separate user.
   - Do not write a §5c that *creates* the supersedes link before checking -
     a conflicting relation raises `ValueError: A conflicting memory relation
     already exists.`
