@@ -432,32 +432,67 @@ PROMOTION = [
 # --------------------------------------------------------------------------
 RECALL = [
     md(
-        "## 5 · Supersession in action, and recall that prefers the present\n"
+        "## 5 · Supersession, step by step: a repair retires the defect\n"
         "\n"
-        "The repair note arrives and is promoted like any other - and the\n"
-        "store's link step recognises that it completes the defect: it writes a `supersedes`\n"
-        "relation and flips the defect memory to `invalid`. Nothing of ours decided that.\n"
+        "The defect note from Section 2 is already a memory. Now the repair note arrives and is\n"
+        "promoted like any other - and the store's link step recognises that it completes the\n"
+        "defect: it writes a `supersedes` relation and flips the defect memory to `invalid`.\n"
+        "Nothing of ours decides that.\n"
         "\n"
-        "Recall then asks the store for **current** memories only - `include_invalid_results=False`\n"
-        "and `record_types=[\"memory\"]` (the thread's raw messages are searchable too, and messages\n"
-        "are never invalidated) - reads provenance off each memory, and weights recency by the\n"
-        "observation's real age."
+        "To watch it happen, `follow(path, stage)` prints where a note lives after each step:\n"
+        "its scratch status, and the memory it became - id, revision and lifecycle status, with\n"
+        "the reason the store recorded if it was invalidated."
+    ),
+    code(
+        "def status_value(m):\n"
+        "    return getattr(m.status, \"value\", m.status)\n"
+        "\n"
+        "\n"
+        "def follow(path, stage):\n"
+        "    note = read_note(path)\n"
+        "    scratch = note[\"status\"] if note else \"-\"\n"
+        "    _names = {\"N\": \"new\", \"P\": \"promoted\", \"D\": \"discarded\"}\n"
+        "    mems = memories_from(path)\n"
+        "    if mems:\n"
+        "        m = mems[0]\n"
+        "        meta = m.metadata or {}\n"
+        "        why = (meta.get(\"$agent_memory\") or {}).get(\"invalidation_reason\")\n"
+        "        durable = (f\"memory {m.id[:8]} rev={meta.get('revision', '')[:8]} \"\n"
+        "                   f\"{status_value(m)}\" + (f\" ({why})\" if why else \"\"))\n"
+        "    else:\n"
+        "        durable = \"(no memory)\"\n"
+        "    print(f\"  {stage:28} | scratch={scratch} ({_names.get(scratch, '?'):9})  ->  {durable}\")\n"
+        "\n"
+        "\n"
+        "follow(SUPERSEDE_DEFECT_PATH, \"1. defect, promoted in §4\")"
+    ),
+    md(
+        "**The repair arrives.** Written, it is only a candidate (`N`, no memory). Promoted, it\n"
+        "becomes its own verbatim memory - and watch the *defect's* line: still `P` in scratch\n"
+        "(that record is history), but its memory flips to **invalid**, with the store's reason."
     ),
     code(
         "write_note(SUPERSEDE_REPAIR_PATH,\n"
         "           f\"Bearing plates at pier 2 of {ASSET_A} replaced and recoated on today's\"\n"
         "           \" shift; corrosion remediated, section loss addressed. Load rating\"\n"
         "           \" restored to design values. Next scheduled check in 12 months.\")\n"
+        "follow(SUPERSEDE_REPAIR_PATH, \"2. repair, written\")\n"
+        "\n"
         "promote_note(SUPERSEDE_REPAIR_PATH)\n"
-        "\n"
-        "\n"
-        "def status_value(m):\n"
-        "    return getattr(m.status, \"value\", m.status)\n"
-        "\n"
+        "follow(SUPERSEDE_REPAIR_PATH, \"3. repair, promoted\")\n"
+        "follow(SUPERSEDE_DEFECT_PATH, \"   defect, after the repair\")\n"
         "\n"
         "_defect_now = [status_value(m) for m in memories_from(SUPERSEDE_DEFECT_PATH)]\n"
         "check(bool(_defect_now) and all(s == \"invalid\" for s in _defect_now),\n"
         "      f\"the store invalidated the defect memory on its own (status={_defect_now})\")"
+    ),
+    md(
+        "**Recall prefers the present.** `recall` asks the store for **current** memories only -\n"
+        "`include_invalid_results=False` and `record_types=[\"memory\"]` (the thread's raw\n"
+        "messages are searchable too, and messages are never invalidated) - reads provenance\n"
+        "off each memory, and weights recency by the observation's real age. The superseded\n"
+        "defect stays queryable as history (Section 5c); it just no longer competes for the\n"
+        "agent's attention."
     ),
     code(
         "def recall(query, asset_id, k=5):\n"
@@ -480,112 +515,18 @@ RECALL = [
         "    return promote.rerank_by_recency(rows)[:k]\n"
         "\n"
         "\n"
+        "print(\"  recall('bearing plate corrosion at pier 2'):\")\n"
         "results = recall(\"bearing plate corrosion at pier 2\", ASSET_A)\n"
         "for r in results:\n"
-        "    print(f\"score={r['score']:.3f} days_ago={r['days_ago']:>4} {r['source_path']}\\n\"\n"
-        "          f\"    {r['content'][:100]}...\")\n"
-        "_texts = \" \".join(r[\"content\"] for r in results)\n"
-        "check(\"replaced\" in _texts or \"remediated\" in _texts, \"repair note is recalled\")\n"
-        "_invalid = {m.id for m in memories_from(SUPERSEDE_DEFECT_PATH) if status_value(m) == \"invalid\"}\n"
-        "check(all(r[\"memory_id\"] not in _invalid for r in results),\n"
-        "      \"no superseded memory competes for retrieval attention\")"
-    ),
-]
-
-# --------------------------------------------------------------------------
-# Section: follow one note end to end
-# --------------------------------------------------------------------------
-TRACE = [
-    md(
-        "## 5b · Follow one note, end to end\n\n"
-        "Every mechanism above touched a *different* note. Here we take a **single** note and\n"
-        "watch it move through every stage, printing where it lives after each step - its\n"
-        "scratch status, and the memory it became, with its provenance and lifecycle status.\n"
-        "This is the whole notebook in one narrative: **written → promoted → remembered →\n"
-        "superseded → dropped from recall.**"
-    ),
-    md(
-        "**The lens.** `follow(path)` reads the note's scratch row and, through the provenance\n"
-        "filter, the memory it became - id, revision, and lifecycle status. A superseded memory\n"
-        "stays in the store as `invalid`, with the reason the store recorded."
-    ),
-    code(
-        "def follow(path, stage):\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"SELECT status FROM HARNESS_SCRATCH WHERE path = :p\", p=path)\n"
-        "        _r = cur.fetchone()\n"
-        "    scratch = _r[0] if _r else \"-\"\n"
-        "    _names = {\"N\": \"new\", \"P\": \"promoted\", \"D\": \"discarded\"}\n"
-        "    mems = memories_from(path)\n"
-        "    if mems:\n"
-        "        m = mems[0]\n"
-        "        meta = m.metadata or {}\n"
-        "        why = (meta.get(\"$agent_memory\") or {}).get(\"invalidation_reason\")\n"
-        "        durable = (f\"long-term: mem={m.id[:8]} rev={meta.get('revision', '')[:8]} \"\n"
-        "                   f\"{status_value(m)}\" + (f\" ({why})\" if why else \"\"))\n"
-        "    else:\n"
-        "        durable = \"long-term: (not promoted yet)\"\n"
-        "    print(f\"  {stage:24} | scratch={scratch} ({_names.get(scratch,'?')})  ->  {durable}\")\n"
-        "\n"
-        "TRACE_DEFECT = f\"/inbox/{ASSET_A}/trace-pier7.md\"\n"
-        "TRACE_REPAIR = f\"/inbox/{ASSET_A}/trace-pier7-repair.md\"\n"
-        "# start the story clean (idempotent): forget any earlier run of this trace\n"
-        "for _p in (TRACE_DEFECT, TRACE_REPAIR):\n"
-        "    for _m in memories_from(_p):\n"
-        "        memory.delete_memory(_m.id)\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"DELETE FROM HARNESS_SCRATCH WHERE path = :p\", p=_p)\n"
-        "conn.commit()\n"
-        "ok(\"follow() lens ready\")"
-    ),
-    md(
-        "**Stage 1 - written.** A field note lands in the inbox at status `N`. Nothing is\n"
-        "durable yet; it is only a *candidate*."
-    ),
-    code(
-        "write_note(TRACE_DEFECT,\n"
-        "           f\"Pier 7 of {ASSET_A}: bearing plate shows active corrosion with measurable\"\n"
-        "           \" section loss. Load rating review recommended; monitor monthly.\")\n"
-        "follow(TRACE_DEFECT, \"1. written\")"
-    ),
-    md(
-        "**Stage 2 - promoted.** The note passes the gate, the store's extraction keeps it\n"
-        "(a completed, durable finding) as one **verbatim** memory, and the memory inherits\n"
-        "its provenance. Watch `scratch` flip `N -> P` and a memory id appear."
-    ),
-    code(
-        "promote_note(TRACE_DEFECT)\n"
-        "follow(TRACE_DEFECT, \"2. promoted\")"
-    ),
-    md(
-        "**Stage 3 - superseded.** Months later the repair is done. Its note is promoted too,\n"
-        "the store's link step recognises it completes the defect, and the old memory flips\n"
-        "to **invalid** - it stays on record, with the reason, but is no longer current."
-    ),
-    code(
-        "write_note(TRACE_REPAIR,\n"
-        "           f\"Pier 7 of {ASSET_A}: bearing plates replaced and recoated; corrosion\"\n"
-        "           \" remediated, section loss addressed. Load rating restored to design.\")\n"
-        "promote_note(TRACE_REPAIR)\n"
-        "follow(TRACE_DEFECT, \"3. after repair promoted\")\n"
-        "follow(TRACE_REPAIR, \"   (the repair itself)\")"
-    ),
-    md(
-        "**Stage 4 - recall prefers the present.** Asking about pier 7 now returns the repair;\n"
-        "the superseded defect is filtered out of retrieval (it remains queryable as history,\n"
-        "just no longer competes for the agent's attention)."
-    ),
-    code(
-        "print(\"  recall('pier 7 bearing corrosion'):\")\n"
-        "_hits = recall(\"pier 7 bearing corrosion\", ASSET_A)\n"
-        "for _h in _hits:\n"
-        "    _tag = (\"  <- the repair (current)\" if _h[\"source_path\"] == TRACE_REPAIR\n"
-        "            else \"  <- the SUPERSEDED defect\" if _h[\"source_path\"] == TRACE_DEFECT else \"\")\n"
-        "    print(f\"    score={_h['score']:.3f}  {_h['source_path']}{_tag}\")\n"
-        "_defect_shown = any(_h[\"source_path\"] == TRACE_DEFECT for _h in _hits)\n"
-        "print(f\"\\n  the superseded defect is \"\n"
-        "      f\"{'STILL shown' if _defect_shown else 'correctly hidden'} in recall\")\n"
-        "ok(\"followed one note: written -> promoted -> remembered -> superseded -> hidden\")"
+        "    _tag = (\"  <- the repair (current)\" if r[\"source_path\"] == SUPERSEDE_REPAIR_PATH\n"
+        "            else \"  <- the SUPERSEDED defect\" if r[\"source_path\"] == SUPERSEDE_DEFECT_PATH\n"
+        "            else \"\")\n"
+        "    print(f\"    score={r['score']:.3f} days_ago={r['days_ago']:>4}  {r['source_path']}{_tag}\")\n"
+        "_paths_recalled = {r[\"source_path\"] for r in results}\n"
+        "check(SUPERSEDE_REPAIR_PATH in _paths_recalled, \"the repair is recalled\")\n"
+        "check(SUPERSEDE_DEFECT_PATH not in _paths_recalled,\n"
+        "      \"the superseded defect no longer competes for retrieval attention\")\n"
+        "ok(\"followed one defect: promoted -> superseded by its repair -> hidden from recall\")"
     ),
 ]
 
@@ -877,7 +818,7 @@ CLOSING = [
 ]
 
 SECTIONS = [INTRO, SETUP, SDK_INIT, SCRATCH, TRIAGE, PROMOTION,
-            RECALL, TRACE, RELATIONS, BRIEFING, CONTINUITY, CLOSING]
+            RECALL, RELATIONS, BRIEFING, CONTINUITY, CLOSING]
 
 
 def build() -> nbf.NotebookNode:
