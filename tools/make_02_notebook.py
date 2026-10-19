@@ -472,6 +472,10 @@ RECALL = [
         "(that record is history), but its memory flips to **invalid**, with the store's reason."
     ),
     code(
+        "# Start this step clean on a re-run: an earlier run's repair memory would otherwise\n"
+        "# show up at stage 2, before the note has even been promoted.\n"
+        "for _m in memories_from(SUPERSEDE_REPAIR_PATH):\n"
+        "    memory.delete_memory(_m.id)\n"
         "write_note(SUPERSEDE_REPAIR_PATH,\n"
         "           f\"Bearing plates at pier 2 of {ASSET_A} replaced and recoated on today's\"\n"
         "           \" shift; corrosion remediated, section loss addressed. Load rating\"\n"
@@ -768,7 +772,6 @@ CONTINUITY = [
         "    connection=conn2,\n"
         "    embedder=OracleONNXEmbedder(conn2, settings.embed_model),\n"
         "    llm=SdkLlm(**litellm_spec(settings)),\n"
-        "    extract_memories=False,\n"
         "    schema_policy=SchemaPolicy.REQUIRE_EXISTING,\n"
         "    table_name_prefix=\"CITY_\",\n"
         ")\n"
