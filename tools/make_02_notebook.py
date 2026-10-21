@@ -54,8 +54,11 @@ SETUP = [
         "settings = load_settings()\n"
         "conn = get_connection(settings)\n"
         "require(conn, \"01_self_improving_copilot\")\n"
-        "CHAT = chat_model(settings)\n"
         "HANDLER = init_tracing(settings)\n"
+        "# Bind tracing once: every CHAT.invoke below is traced without passing callbacks.\n"
+        "CHAT = chat_model(settings)\n"
+        "if HANDLER:\n"
+        "    CHAT = CHAT.with_config(callbacks=[HANDLER])\n"
         "ok(f\"connected - provider={settings.llm_provider}, langfuse={settings.langfuse_mode}\")"
     ),
     code(
@@ -456,6 +459,30 @@ RECALL = [
         "its scratch status, and the memory it became - id, revision and lifecycle status, with\n"
         "the reason the store recorded if it was invalidated."
     ),
+    md(
+        "**A lens on the memory tables.** Everything from here on is written by the store,\n"
+        "into its managed `CITY_` tables. The SDK calls above read them back for you, which\n"
+        "hides *where* each thing lives. Three read-only helpers in\n"
+        "`cityops_harness.memory_tables` print the rows themselves, so each call can be\n"
+        "matched to the record it left. Each takes the connection first:\n\n"
+        "- `show_memory_trail(conn, path)` - one note's trail: the `CITY_MESSAGE` row\n"
+        "  `promote_note` posted, the `CITY_MEMORY` row extraction kept (metadata inherited\n"
+        "  from that message), the `CITY_RECORD_CHUNKS` rows `search()` scans, and every\n"
+        "  `CITY_MEMORY_LINK` row touching the memory.\n"
+        "- `show_link_rows(conn, memory_id)` - the relation rows touching one memory, as\n"
+        "  stored: direction, type, opposite type, and the link's own metadata.\n"
+        "- `show_memory_rows(conn, asset_id)` - every memory row for an asset with its\n"
+        "  lifecycle status and provenance: the valid rows are what recall and the briefing\n"
+        "  see, the invalid ones are history.\n\n"
+        "Plain SQL, read-only, used after each write in \u00a75-\u00a77. Nothing here is needed to\n"
+        "*use* the store - it is how you check what the store did. Open\n"
+        "`src/cityops_harness/memory_tables.py` to see the queries."
+    ),
+    code(
+        "from cityops_harness.memory_tables import show_memory_trail, show_link_rows, show_memory_rows\n"
+        "\n"
+        "ok(\"memory-table lens ready: show_memory_trail / show_link_rows / show_memory_rows\")"
+    ),
     code(
         "def status_value(m):\n"
         "    return getattr(m.status, \"value\", m.status)\n"
@@ -477,12 +504,16 @@ RECALL = [
         "    print(f\"  {stage:28} | scratch={scratch} ({_names.get(scratch, '?'):9})  ->  {durable}\")\n"
         "\n"
         "\n"
-        "follow(SUPERSEDE_DEFECT_PATH, \"1. defect, promoted in §4\")"
+        "follow(SUPERSEDE_DEFECT_PATH, \"1. defect, promoted in §4\")\n"
+        "show_memory_trail(conn, SUPERSEDE_DEFECT_PATH, \"the defect's rows before the repair arrives\")"
     ),
     md(
         "**The repair arrives.** Written, it is only a candidate (`N`, no memory). Promoted, it\n"
         "becomes its own verbatim memory - and watch the *defect's* line: still `P` in scratch\n"
-        "(that record is history), but its memory flips to **invalid**, with the store's reason."
+        "(that record is history), but its memory flips to **invalid**, with the store's reason.\n\n"
+        "Then the two trails: the repair's new `CITY_MEMORY` row, the defect's row now\n"
+        "`invalid` with its chunk flipped too, and the one `CITY_MEMORY_LINK` row that did it -\n"
+        "written by the store's link step, so its `metadata` is empty."
     ),
     code(
         "write_note(SUPERSEDE_REPAIR_PATH,\n"
@@ -497,7 +528,9 @@ RECALL = [
         "\n"
         "_defect_now = [status_value(m) for m in memories_from(SUPERSEDE_DEFECT_PATH)]\n"
         "check(bool(_defect_now) and all(s == \"invalid\" for s in _defect_now),\n"
-        "      f\"the store invalidated the defect memory on its own (status={_defect_now})\")"
+        "      f\"the store invalidated the defect memory on its own (status={_defect_now})\")\n"
+        "show_memory_trail(conn, SUPERSEDE_REPAIR_PATH, \"the repair's rows\")\n"
+        "show_memory_trail(conn, SUPERSEDE_DEFECT_PATH, \"the defect's rows after the repair\")"
     ),
     md(
         "**Recall prefers the present.** `recall` asks the store for **current** memories only -\n"
@@ -539,7 +572,9 @@ RECALL = [
         "check(SUPERSEDE_REPAIR_PATH in _paths_recalled, \"the repair is recalled\")\n"
         "check(SUPERSEDE_DEFECT_PATH not in _paths_recalled,\n"
         "      \"the superseded defect no longer competes for retrieval attention\")\n"
-        "ok(\"followed one defect: promoted -> superseded by its repair -> hidden from recall\")"
+        "ok(\"followed one defect: promoted -> superseded by its repair -> hidden from recall\")\n"
+        "print(\"\\n  the rows behind that - recall only ever saw status=valid:\")\n"
+        "show_memory_rows(conn, ASSET_A)"
     ),
 ]
 
@@ -573,8 +608,7 @@ RELATIONS = [
         "# Find them by provenance - no sidecar, no raw SQL.\n"
         "_d, _r = memories_from(SUPERSEDE_DEFECT_PATH), memories_from(SUPERSEDE_REPAIR_PATH)\n"
         "DEFECT_MID = _d[0].id if _d else None\n"
-        "REPAIR_MID = _r[0].id if _r else None"
-
+        "REPAIR_MID = _r[0].id if _r else None\n"
         "check(bool(DEFECT_MID and REPAIR_MID),\n"
         "      f\"found both memories (defect={str(DEFECT_MID)[:12]}, \"\n"
         "      f\"repair={str(REPAIR_MID)[:12]})\")\n"
@@ -617,7 +651,12 @@ RELATIONS = [
         "      \"the store recorded a 'supersedes' relation on its own, during promotion\")\n"
         "check(status_of(DEFECT_MID) == \"invalid\",\n"
         "      f\"and flipped the superseded memory's lifecycle (status={status_of(DEFECT_MID)!r}) - \"\n"
-        "      \"no column of ours involved\")"
+        "      \"no column of ours involved\")\n"
+        "\n"
+        "# The same relation as the store holds it. Note what it carries: the inferred link\n"
+        "# has no metadata; the one you write by hand below will.\n"
+        "NAMES = {DEFECT_MID: \"defect\", REPAIR_MID: \"repair\"}\n"
+        "show_link_rows(conn, DEFECT_MID, NAMES, label=\"the relation as a CITY_MEMORY_LINK row\")"
     ),
     md(
         "**The payoff is not the hiding - it is the asking.** `recall()` in Section 5 can only\n"
@@ -659,6 +698,8 @@ RELATIONS = [
         "check(_restored == \"valid\",\n"
         "      f\"deleting the relation revalidated the memory (status={_restored!r}) - \"\n"
         "      \"the trigger did that, not our code\")\n"
+        "show_link_rows(conn, DEFECT_MID, NAMES, label=\"after delete_record_link\")\n"
+        "show_memory_trail(conn, SUPERSEDE_DEFECT_PATH, \"the defect's rows - revalidated by the trigger\")\n"
         "\n"
         "# \u270f\ufe0f TODO(4): put it back by hand. The repair memory SUPERSEDES the defect one -\n"
         "#             direction matters, and the source is the memory that wins. Both\n"
@@ -677,6 +718,9 @@ RELATIONS = [
         "check(status_of(DEFECT_MID) == \"invalid\",\n"
         "      \"writing the relation by hand invalidates it again - same mechanism, \"\n"
         "      \"whether the store inferred it or you asserted it\")\n"
+        "show_link_rows(conn, DEFECT_MID, NAMES,\n"
+        "               label=\"after link_records - the hand-written row carries its own metadata\")\n"
+        "show_memory_trail(conn, SUPERSEDE_DEFECT_PATH, \"the defect's rows - invalid again\")\n"
         "ok(\"supersession is recorded in the store, not beside it\")"
     ),
 ]
@@ -688,10 +732,10 @@ BRIEFING = [
     md(
         "## 6 · The morning briefing, built from current memory\n\n"
         "Everything so far pays off here. The briefing reads the asset's **current** memories\n"
-        "- superseded ones are already `invalid`, so the corroded-bearing defect is not\n"
-        "reported as open - plus a few numbers from the findings table. The model narrates;\n"
-        "the code decides what it is allowed to narrate, and every memory carries its\n"
-        "`source_path`, so each claim can be traced to the note it came from.\n\n"
+        "and nothing else - superseded ones are already `invalid`, so the corroded-bearing\n"
+        "defect is not reported as open. The model narrates; the code decides what it is\n"
+        "allowed to narrate, and every memory carries its `source_path`, so each claim can be\n"
+        "traced to the note it came from.\n\n"
         "Run it from whatever scheduler you already have; the briefing is just a function."
     ),
     code(
@@ -699,19 +743,12 @@ BRIEFING = [
         "\n"
         "\n"
         "def build_briefing(asset_id):\n"
-        "    \"\"\"Current, provenanced memories + recent finding counts. No model call.\"\"\"\n"
+        "    \"\"\"The asset's current, provenanced memories. No SQL, no model call.\"\"\"\n"
         "    mems = memory.list_memories(user_id=asset_id, agent_id=\"CITY\", limit=200)\n"
-        "    current = [m for m in mems\n"
-        "               if status_value(m) == \"valid\" and \"source_path\" in (m.metadata or {})]\n"
-        "    with conn.cursor() as cur:\n"
-        "        cur.execute(\"\"\"SELECT severity, COUNT(*) FROM CITY_INSPECTION_FINDING\n"
-        "                       WHERE asset_id = :a AND days_ago <= 30\n"
-        "                       GROUP BY severity\"\"\", a=asset_id)\n"
-        "        findings = dict(cur.fetchall())\n"
+        "    current = [m for m in mems if status_value(m) == \"valid\"]\n"
         "    return {\n"
         "        \"asset\": asset_id,\n"
         "        \"generated_for\": date.today().isoformat(),\n"
-        "        \"findings_last_30_days\": findings,\n"
         "        \"memories\": sorted(({\"source_path\": m.metadata[\"source_path\"],\n"
         "                             \"days_ago\": m.metadata.get(\"days_ago\") or 0,\n"
         "                             \"content\": m.content} for m in current),\n"
@@ -720,27 +757,22 @@ BRIEFING = [
         "\n"
         "\n"
         "BRIEFING_INPUT = build_briefing(ASSET_A)\n"
-        "for _m in BRIEFING_INPUT[\"memories\"]:\n"
-        "    print(f\"  {_m['days_ago']:>4}d  {_m['source_path']}\")\n"
         "_paths = {m[\"source_path\"] for m in BRIEFING_INPUT[\"memories\"]}\n"
         "check(SUPERSEDE_REPAIR_PATH in _paths and SUPERSEDE_DEFECT_PATH not in _paths,\n"
-        "      \"the briefing sees the repair, not the defect it superseded\")"
+        "      \"the briefing sees the repair, not the defect it superseded\")\n"
+        "show_memory_rows(conn, ASSET_A, label=\"CITY_MEMORY the briefing was built from - only valid rows made it in\")"
     ),
     code(
         "def narrate_briefing(briefing):\n"
-        "    # ✏️ TODO(5): the grounded narration - ask CHAT for a <=6-sentence morning\n"
-        "    #             briefing using ONLY the memories and numbers in `briefing`, citing\n"
-        "    #             each memory's source_path in [brackets]. Return the text.\n"
+        "    # \u270f\ufe0f TODO(5): the grounded narration - ask CHAT for a <=6-sentence morning\n"
+        "    #             briefing using ONLY the memories in `briefing`, citing each one's\n"
+        "    #             source_path in [brackets]. Return the text.\n"
         "    # TODO-SOLUTION-START\n"
-        "    cfg = {\"callbacks\": [HANDLER]} if HANDLER else {}\n"
-        "    resp = CHAT.invoke(\n"
+        "    return CHAT.invoke(\n"
         "        \"Write a morning asset-risk briefing for a city operations chief.\\n\"\n"
-        "        \"HARD RULE: use ONLY the memories and numbers in this JSON - do not estimate,\\n\"\n"
-        "        \"extrapolate, or invent. Cite each memory you use by its source_path in\\n\"\n"
-        "        \"[brackets]. <= 6 sentences, plain prose.\\n\\n\"\n"
-        "        + json.dumps(briefing), config=cfg)\n"
-        "    return resp.content if isinstance(resp.content, str) else \"\".join(\n"
-        "        p.get(\"text\", \"\") if isinstance(p, dict) else str(p) for p in resp.content)\n"
+        "        \"HARD RULE: use ONLY the memories in this JSON - do not estimate, extrapolate,\\n\"\n"
+        "        \"or invent. Cite each memory you use by its source_path in [brackets].\\n\"\n"
+        "        \"<= 6 sentences, plain prose.\\n\\n\" + json.dumps(briefing)).text\n"
         "    # TODO-SOLUTION-END\n"
         "\n"
         "\n"
@@ -750,8 +782,7 @@ BRIEFING = [
         "# Kept as a scratch note: outside /inbox, so it is never promoted into memory.\n"
         "BRIEFING_PATH = f\"/briefings/{ASSET_A}/{BRIEFING_INPUT['generated_for']}.md\"\n"
         "write_note(BRIEFING_PATH, BRIEFING_TEXT)\n"
-        "_cited = sorted(p for p in _paths if p in BRIEFING_TEXT)\n"
-        "ok(f\"briefing saved to {BRIEFING_PATH}; cites {len(_cited)} of {len(_paths)} memories\")"
+        "ok(f\"briefing saved to {BRIEFING_PATH}\")"
     ),
 ]
 
@@ -799,6 +830,7 @@ CONTINUITY = [
         "    _narrated = cur.fetchone()[0]\n"
         "check(len(plan[\"next\"]) > 0 and len(_hits2) > 0 and _narrated >= 1,\n"
         "      \"new session resumed the plan, the memories, and the briefing\")\n"
+        "show_memory_rows(conn2, ASSET_A, label=\"CITY_MEMORY as the new session sees it (via conn2)\")\n"
         "conn2.close()"
     ),
 ]
