@@ -36,7 +36,9 @@ class Settings:
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if env is None:
-        load_dotenv()
+        # override=True: .env is authoritative, even when the same variable is
+        # already set in the ambient environment (e.g. a Codespaces secret).
+        load_dotenv(override=True)
         env = os.environ
 
     provider = env.get("LLM_PROVIDER", "anthropic").lower()
