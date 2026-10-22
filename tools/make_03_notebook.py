@@ -36,7 +36,7 @@ INTRO = [
         "|---|---|\n"
         "| Card judged by character count | **Fidelity probe**: seven facts planted before turn 28, asked for at turn 96 - through the summary alone, the card's retrieved memories alone, the full card, and the lower tiers when the card fails |\n"
         "| \"The bytes are recoverable\" declared a win | **Agent in the loop**: the model must notice the reference, fetch it, and use the payload |\n"
-        "| Offloading and promotion never tested together | Offloaded blobs are **barred from promotion**, and the notebook proves it |"
+        "| Offloading and promotion never tested together | Offloaded payloads are **not memories**: `context.is_offloaded_blob` bars their paths from promotion, independently of notebook 02's opt-in prefix |"
     ),
 ]
 
@@ -62,7 +62,7 @@ SETUP = [
         "from cityops_harness.llm import chat_model, litellm_spec\n"
         "from cityops_harness.state import require, verify\n"
         "from cityops_harness.tracing import init_tracing\n"
-        "from cityops_harness import context, promote\n"
+        "from cityops_harness import context\n"
         "\n"
         "settings = load_settings()\n"
         "conn = get_connection(settings)\n"
@@ -769,97 +769,13 @@ OFFLOAD = [
         "passes. A model that ignores the reference and answers from the stub is telling you\n"
         "something true about your prompt: the system message has to say plainly that a\n"
         "reference is not an answer. \"Bytes are recoverable\" would have scored this run\n"
-        "green either way - which is exactly why it was the wrong measurement."
-    ),
-]
-
-# --------------------------------------------------------------------------
-# Section: offloading x promotion
-# --------------------------------------------------------------------------
-EXCLUSION = [
-    md(
-        "## 6 · Offloaded blobs must never be promoted\n\n"
-        "This is the interaction the review flagged as untested. Notebook 02 promotes\n"
-        "curated notes into long-term memory. Offloading writes large, machine-generated\n"
-        "dumps to disk-like paths. If those two features meet without a rule between them,\n"
-        "a 40KB JSON export gets embedded, chunked and remembered forever as though a human\n"
-        "had written it down on purpose.\n\n"
-        "So we put the blob paths in front of notebook 02's real gate and watch what happens."
-    ),
-    code(
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"DELETE FROM HARNESS_SCRATCH WHERE path LIKE '/tool_out/blob/%'\")\n"
-        "    cur.execute(\"SELECT blob_id, path FROM HARNESS_BLOB\")\n"
-        "    blob_rows = cur.fetchall()\n"
-        "    for blob_id, path in blob_rows:\n"
-        "        body = f\"offloaded export {blob_id}\"\n"
-        "        cur.execute(\n"
-        "            \"INSERT INTO HARNESS_SCRATCH (path, content, revision, status)\"\n"
-        "            \" VALUES (:1, :2, :3, 'N')\",\n"
-        "            (path, body, promote.note_revision(body)),\n"
-        "        )\n"
-        "    # ...and one genuine curated note, so we can tell a rule from a blanket veto.\n"
-        "    cur.execute(\"DELETE FROM HARNESS_SCRATCH WHERE path = :1\", (\"/inbox/\" + TARGET_ASSET + \"/season.md\",))\n"
-        "    _season_note = (f\"Season summary for {TARGET_ASSET}: {len(EXPORT_ROWS)} findings \"\n"
-        "                    f\"on file; the oldest still open is {OLDEST['finding_id']}.\")\n"
-        "    cur.execute(\n"
-        "        \"INSERT INTO HARNESS_SCRATCH (path, content, revision, status)\"\n"
-        "        \" VALUES (:1, :2, :3, 'N')\",\n"
-        "        (f\"/inbox/{TARGET_ASSET}/season.md\", _season_note,\n"
-        "         promote.note_revision(_season_note)),\n"
-        "    )\n"
-        "conn.commit()\n"
-        "\n"
-        "with conn.cursor() as cur:\n"
-        "    cur.execute(\"SELECT path FROM HARNESS_SCRATCH WHERE status = 'N'\")\n"
-        "    candidates = [r[0] for r in cur.fetchall()]\n"
-        "print(f\"{len(candidates)} candidate notes in the scratchpad\")"
-    ),
-    md(
-        "**Run notebook 02's gate over the mix.** Every blob path plus one genuinely curated\n"
-        "`/inbox` note go through the promotion rule. Refused notes are marked discarded\n"
-        "(`D`); admitted ones stay candidates (`N`) - this notebook has no memory client, and\n"
-        "in notebook 02 only `promote_note` turns a candidate into a promoted (`P`) note. The\n"
-        "two checks assert both directions: every blob is refused, and the real note is still\n"
-        "admitted - a specific rule, not a blanket veto."
-    ),
-    code(
-        "def promotable(path):\n"
-        "    \"\"\"Notebook 02's opt-in gate, plus an explicit bar on offloaded payloads.\"\"\"\n"
-        "    # ✏️ TODO(5): a note is promotable only if it is inside the opt-in area AND\n"
-        "    #   is not an offloaded blob. Use promote.triage_allowed and\n"
-        "    #   context.is_offloaded_blob.\n"
-        "    # TODO-SOLUTION-START\n"
-        "    return promote.triage_allowed(path) and not context.is_offloaded_blob(path)\n"
-        "    # TODO-SOLUTION-END\n"
-        "\n"
-        "\n"
-        "verdicts = {p: promotable(p) for p in candidates}\n"
-        "with conn.cursor() as cur:\n"
-        "    for path, allowed in verdicts.items():\n"
-        "        if not allowed:\n"
-        "            cur.execute(\"UPDATE HARNESS_SCRATCH SET status = 'D' WHERE path = :1\", (path,))\n"
-        "conn.commit()\n"
-        "\n"
-        "for path, allowed in sorted(verdicts.items()):\n"
-        "    print(f\"  {'admit  ' if allowed else 'discard'}  {path}\")\n"
-        "\n"
-        "blobs = [p for p in verdicts if context.is_offloaded_blob(p)]\n"
-        "check(bool(blobs) and not any(verdicts[p] for p in blobs),\n"
-        "      f\"all {len(blobs)} offloaded blob(s) refused promotion\")\n"
-        "check(any(allowed for path, allowed in verdicts.items() if not context.is_offloaded_blob(path)),\n"
-        "      \"a genuinely curated /inbox note is still admitted - a rule, not a blanket veto\")"
-    ),
-    md(
-        "### Belt *and* braces, on purpose\n\n"
-        "`/tool_out/` already sits outside notebook 02's `/inbox/` opt-in prefix, so today\n"
-        "`triage_allowed` alone would have refused these paths. The second condition looks\n"
-        "redundant - and that is precisely the argument for writing it down.\n\n"
-        "The opt-in prefix is a *product* decision that will change (someone will widen it\n"
-        "to `/inbox/` plus `/reports/`, or drop the prefix scheme entirely). The rule that\n"
-        "machine-generated offload payloads are not memories is an *architectural* one that\n"
-        "should survive that change. Encoding it as an accident of string prefixes means it\n"
-        "silently stops holding the day someone edits an unrelated constant."
+        "green either way - which is exactly why it was the wrong measurement.\n\n"
+        "One rule travels with these blobs: they are **not memories**. Notebook 02's\n"
+        "promotion gate is an opt-in prefix (`/inbox/`), which already excludes\n"
+        "`/tool_out/blob/` paths today - but that prefix is a product decision that will\n"
+        "change, and the rule that machine-generated dumps never get embedded and remembered\n"
+        "is an architectural one that should survive it. So it is written down on its own:\n"
+        "`context.is_offloaded_blob(path)`, which any promotion gate can call."
     ),
 ]
 
@@ -868,7 +784,7 @@ EXCLUSION = [
 # --------------------------------------------------------------------------
 CLOSING = [
     md(
-        "## 7 \u00b7 State check"
+        "## 6 \u00b7 State check"
     ),
     code(
         "for desc, passed in verify(conn, \"03_context_engineering\"):\n"
@@ -895,7 +811,7 @@ CLOSING = [
     ),
 ]
 
-SECTIONS = [INTRO, SETUP, SEASON, CHECKPOINTS, PROBE, FALLBACK, OFFLOAD, EXCLUSION, CLOSING]
+SECTIONS = [INTRO, SETUP, SEASON, CHECKPOINTS, PROBE, FALLBACK, OFFLOAD, CLOSING]
 
 
 def build() -> nbf.NotebookNode:

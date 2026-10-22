@@ -431,9 +431,12 @@ The test is **behavioural**, not "the bytes are recoverable": the model must not
 the reference, fetch it, and use it. The check confirms the answer names an **opaque
 `finding_id`** that only exists in the payload — proof it was actually read.
 
-Finally, the **offload × promotion exclusion**: blob paths (`/tool_out/blob/…`) are
-run through notebook 02's real gate and refused, while a genuine `/inbox` note still
-promotes — so machine-generated dumps never masquerade as durable memories.
+One rule travels with the blobs: they are **not memories**. `context.is_offloaded_blob`
+bars `/tool_out/blob/…` paths from promotion on its own, independently of notebook
+02's `/inbox/` opt-in prefix — the prefix is a product decision that will change, the
+rule is architectural. (An earlier §6 staged this against notebook 02's gate live; it
+was cut 2026-10-22 because the prefix already refused those paths, so the cells proved
+nothing the unit test does not.)
 
 ---
 

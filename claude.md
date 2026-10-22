@@ -23,7 +23,9 @@ Strength-based card consolidation — once the only deferred item — was built
 2026-07-25 (notebook 03 §4b).
 
 Live-verification currency, which drifts as notebooks change: nb03 re-verified
-2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`), nb01 **2026-10-19: 0 cell errors, 30 green
+2026-10-08 (0 cell errors, 27 green checks, `LANGFUSE_MODE=off`; the §6 offload×promotion
+section and its 2 checks were cut 2026-10-22 and the season grew to 96 turns the same day, so
+nb03 is owed a fresh live pass), nb01 **2026-10-19: 0 cell errors, 30 green
 checks** (`LANGFUSE_MODE=off`),
 nb02 **2026-10-19 (final, with the §2 clean-slate reset): 0 cell errors, 32 green
 checks** (`LANGFUSE_MODE=off`, 37 cells); reset cleared 12 stale memories, recall and the
