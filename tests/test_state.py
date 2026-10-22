@@ -86,9 +86,11 @@ def test_registry_seeds_notebook_02():
 def test_registry_seeds_notebook_03():
     checks = REGISTRY["03_context_engineering"]
     sqls = " ".join(c.sql for c in checks)
-    assert len(checks) == 3
-    for t in ("HARNESS_TRANSCRIPT", "CITY_THREAD", "HARNESS_BLOB"):
+    assert len(checks) == 2
+    for t in ("CITY_THREAD", "HARNESS_BLOB"):
         assert t in sqls
+    # the season is a Python list posted to the store; no transcript table of its own
+    assert "HARNESS_TRANSCRIPT" not in sqls
 
 
 def test_registry_seeds_notebook_04():

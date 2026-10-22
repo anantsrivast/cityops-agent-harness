@@ -64,10 +64,6 @@ REGISTRY: dict[str, list[ArtifactCheck]] = {
     ],
     "03_context_engineering": [
         ArtifactCheck(
-            description="simulated season transcript HARNESS_TRANSCRIPT",
-            sql="SELECT COUNT(*) FROM user_tables WHERE table_name = 'HARNESS_TRANSCRIPT'",
-        ),
-        ArtifactCheck(
             description="a season thread in the memory store",
             sql="SELECT COUNT(*) FROM CITY_THREAD WHERE user_id = 'inspection-season'",
         ),
